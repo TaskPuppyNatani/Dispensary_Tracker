@@ -1,0 +1,37 @@
+{
+  "name": "dispensary-tracker",
+  "version": "1.0.0",
+  "description": "Dispensary Receipt Tracker — Electron desktop app",
+  "author": "Natani",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "35.7.5"
+  },
+  "build": {
+    "appId": "com.natani.dispensary-tracker",
+    "productName": "Dispensary Tracker",
+    "forceCodeSigning": false,
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!node_modules/**",
+      "!*.md"
+    ]
+  }
+}

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0f1418">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Dispensary Receipt Tracker</title>
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-title" content="Dispensary Tracker" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="background-orb orb-a" aria-hidden="true"></div>
+    <div class="background-orb orb-b" aria-hidden="true"></div>
+
+    <header class="app-header reveal-up">
+      <div>
+        <p class="eyebrow">Tax Helper PWA</p>
+        <h1>Dispensary Receipt Tracker</h1>
+      </div>
+      <div class="settings-wrap">
+        <button id="settingsToggle" class="gear-btn" type="button" aria-label="Open settings and export options">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.2"></circle>
+            <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.7l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.7-.3 1.6 1.6 0 0 0-1 1.4V21a2 2 0 0 1-4 0v-.2a1.6 1.6 0 0 0-1-1.4 1.6 1.6 0 0 0-1.7.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.7 1.6 1.6 0 0 0-1.4-1H3a2 2 0 0 1 0-4h.2a1.6 1.6 0 0 0 1.4-1 1.6 1.6 0 0 0-.3-1.7l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.7.3h.1A1.6 1.6 0 0 0 10 3.2V3a2 2 0 0 1 4 0v.2a1.6 1.6 0 0 0 1 1.4h.1a1.6 1.6 0 0 0 1.7-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.7v.1a1.6 1.6 0 0 0 1.4 1H21a2 2 0 0 1 0 4h-.2a1.6 1.6 0 0 0-1.4 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="card reveal-up" style="--delay: 0.1s;">
+        <h2>1. Add Receipt</h2>
+        <p class="hint">Take a photo or upload an image, then scan to auto-fill fields.</p>
+        <label class="file-drop" for="receiptInput">
+          <input id="receiptInput" type="file" accept="image/*" capture="environment">
+          <span>Select Receipt Image</span>
+        </label>
+
+        <div id="previewWrap" class="preview-wrap" hidden>
+          <img id="receiptPreview" alt="Receipt preview">
+        </div>
+
+        <div class="row-actions">
+          <button id="scanBtn" type="button" class="accent-btn">Scan Receipt</button>
+          <span id="scanStatus" class="status-text">Waiting for image...</span>
+        </div>
+      </section>
+
+      <section class="card reveal-up" style="--delay: 0.2s;">
+        <h2>2. Confirm Extracted Data</h2>
+        <form id="receiptForm" class="receipt-form">
+          <label>
+            <span>Location Name <span id="match-confidence" aria-live="polite"></span></span>
+            <input id="locationInput" type="text" required maxlength="120" placeholder="Dispensary name">
+          </label>
+
+          <label>
+            <span>License Number</span>
+            <input id="licenseInput" type="text" maxlength="40" placeholder="Auto-filled when matched">
+          </label>
+
+          <div class="field-grid">
+            <label>
+              <span>Date</span>
+              <input id="dateInput" type="date" required>
+            </label>
+            <label>
+              <span>Time</span>
+              <input id="timeInput" type="time">
+            </label>
+            <label>
+              <span>Amount Spent ($)</span>
+              <input id="amountInput" type="number" inputmode="decimal" step="0.01" min="0" required placeholder="0.00">
+            </label>
+          </div>
+
+          <label>
+            <span>Notes (optional)</span>
+            <textarea id="notesInput" rows="2" maxlength="300" placeholder="Extra info for tax records"></textarea>
+          </label>
+
+          <div class="row-actions">
+            <button id="saveReceiptBtn" type="submit" class="accent-btn">Save Receipt Record</button>
+            <button id="cancelEditBtn" type="button" class="menu-btn" hidden>Cancel Edit</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card reveal-up" style="--delay: 0.3s;">
+        <div class="history-head">
+          <h2>3. Saved Records</h2>
+          <p id="recordCount" class="hint">0 receipts saved</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Image</th>
+                <th>Location</th>
+                <th>License</th>
+                <th>Date</th>
+                <th>Time</th>
+                <th>Amount</th>
+                <th>Saved</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="receiptRows"></tbody>
+          </table>
+        </div>
+        <p id="emptyState" class="hint">No receipts saved yet. Scan your first one above.</p>
+      </section>
+
+      <div class="running-total-wrap reveal-up" style="--delay: 0.35s;">
+        <p id="runningTotalLabel" class="running-total-text" aria-live="polite">Running Total: $0.00</p>
+      </div>
+    </main>
+
+    <template id="rowTemplate">
+      <tr>
+        <td data-label="Image"><img class="thumb" alt="Receipt thumbnail"></td>
+        <td data-col="location" data-label="Location"></td>
+        <td data-col="license" data-label="License"></td>
+        <td data-col="date" data-label="Date"></td>
+        <td data-col="time" data-label="Time"></td>
+        <td data-col="amount" data-label="Amount"></td>
+        <td data-col="saved" data-label="Saved"></td>
+        <td data-label="Actions">
+          <div class="action-buttons">
+            <button class="edit-btn" type="button">Edit</button>
+            <button class="delete-btn" type="button">Delete</button>
+          </div>
+        </td>
+      </tr>
+    </template>
+
+    <script defer src="vendor/tesseract.min.js"></script>
+    <script defer src="vendor/jszip.min.js"></script>
+    <script type="module" src="js/app.js"></script>
+
+    <!-- Zoom View Modal -->
+    <div id="imageModal" role="dialog" aria-modal="true" aria-label="Receipt zoom view" hidden>
+      <button id="imageModalClose" aria-label="Close zoom view">&times;</button>
+      <img id="imageModalImg" alt="Full-size receipt">
+    </div>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run PWA Server (8091)",
+      "type": "shell",
+      "command": "if (Get-Command py -ErrorAction SilentlyContinue) { py -m http.server 8091 --bind 127.0.0.1 } elseif (Get-Command python -ErrorAction SilentlyContinue) { python -m http.server 8091 --bind 127.0.0.1 } else { Write-Error 'Python was not found. Install Python or use Live Server.'; exit 1 }",
+      "isBackground": true,
+      "problemMatcher": [],
+      "group": "build"
+    }
+  ]
+}

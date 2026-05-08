@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#0f1418">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>Settings - Dispensary Receipt Tracker</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="background-orb orb-a" aria-hidden="true"></div>
+    <div class="background-orb orb-b" aria-hidden="true"></div>
+
+    <header class="app-header">
+      <div>
+        <p class="eyebrow">Tax Helper PWA</p>
+        <h1>Settings</h1>
+      </div>
+      <button id="backBtn" class="gear-btn" type="button" aria-label="Back to main app">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M19 12H5"></path>
+          <path d="M12 19l-7-7 7-7"></path>
+        </svg>
+      </button>
+    </header>
+
+    <main class="layout">
+      <div class="card">
+        <h2>Data Management</h2>
+        <div class="row-actions">
+          <button id="exportCsvBtn" type="button" class="accent-btn">Export CSV</button>
+          <button id="exportZipBtn" type="button" class="menu-btn">Create Backup ZIP (CSV + Images)</button>
+        </div>
+        <div class="row-actions">
+          <button id="importBackupBtn" type="button" class="menu-btn">Import CSV/ZIP Backup</button>
+          <input id="importBackupInput" type="file" accept=".csv,.zip,text/csv,application/zip" hidden>
+        </div>
+        <div class="row-actions">
+          <button id="clearAllReceiptsBtn" type="button" class="menu-btn">Clear All Receipts</button>
+        </div>
+        <div class="row-actions">
+          <button id="chooseBackupFileBtn" type="button" class="menu-btn">Choose Auto-Backup File</button>
+          <button id="clearBackupFileBtn" type="button" class="menu-btn">Disable Auto-Backup File</button>
+        </div>
+        <div class="row-actions">
+          <button id="storageProtectBtn" type="button" class="menu-btn">Request Storage Protection</button>
+        </div>
+        <p id="scanStatus" class="status-text" role="status" aria-live="polite">Use export/import tools to protect your data.</p>
+        <p style="font-size: 0.8rem; color: var(--muted); margin: 0.5rem 0; line-height: 1.3;">Data is stored locally on your device using IndexedDB. Regular backups are recommended for extra safety.</p>
+      </div>
+
+      <div class="card">
+        <h2>App Preferences</h2>
+        <label class="theme-toggle" for="backupReminderSwitch">
+          <span>Weekly backup reminder</span>
+          <input id="backupReminderSwitch" type="checkbox" role="switch">
+        </label>
+        <label class="theme-toggle" for="autoBackupPromptSwitch">
+          <span>Ask backup after each save</span>
+          <input id="autoBackupPromptSwitch" type="checkbox" role="switch">
+        </label>
+        <label class="theme-toggle" for="themeSwitch">
+          <span>Light mode</span>
+          <input id="themeSwitch" type="checkbox" role="switch">
+        </label>
+        <label class="theme-toggle" for="compactSwitch">
+          <span>Compact layout</span>
+          <input id="compactSwitch" type="checkbox" role="switch">
+        </label>
+      </div>
+
+      <div class="card">
+        <h2>App Installation</h2>
+        <button id="installBtn" type="button" class="menu-btn" hidden>Install App</button>
+        <p style="font-size: 0.8rem; color: var(--muted); margin: 0.5rem 0; line-height: 1.3;">Install this app on your device for offline access and better performance.</p>
+      </div>
+    </main>
+
+    <script defer src="vendor/jszip.min.js"></script>
+    <script type="module" src="js/app.js"></script>
+  </body>
+</html>
