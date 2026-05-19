@@ -21,8 +21,18 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Cache electron binaries
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\electron\Cache
+          key: electron-win-${{ hashFiles('package-lock.json') }}
+      - name: Cache electron-builder tools
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\electron-builder\Cache
+          key: electron-builder-win-${{ hashFiles('package-lock.json') }}
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build Windows
         run: npm run build:win
       - uses: actions/upload-artifact@v4
@@ -39,8 +49,18 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Cache electron binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/electron
+          key: electron-mac-${{ hashFiles('package-lock.json') }}
+      - name: Cache electron-builder tools
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/electron-builder
+          key: electron-builder-mac-${{ hashFiles('package-lock.json') }}
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build macOS
         run: npm run build:mac
         env:
@@ -59,8 +79,20 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Cache electron binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron
+          key: electron-linux-${{ hashFiles('package-lock.json') }}
+      - name: Cache electron-builder tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/electron-builder
+          key: electron-builder-linux-${{ hashFiles('package-lock.json') }}
+      - name: Install Linux build dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y fakeroot
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build Linux
         run: npm run build:linux
       - uses: actions/upload-artifact@v4
