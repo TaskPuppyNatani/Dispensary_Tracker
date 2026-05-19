@@ -266,6 +266,42 @@ import {
     // Expose opener so renderReceipts can attach thumbnail click handlers
     state.openImageModal = openImageModal;
 
+    // ── Search / sort / group bindings ─────────────────────────────────
+    if (elements.receiptSearch) {
+      elements.receiptSearch.addEventListener("input", () => {
+        state.receiptSearchQuery = elements.receiptSearch.value;
+        if (elements.receiptSearchClear) {
+          elements.receiptSearchClear.hidden = !state.receiptSearchQuery;
+        }
+        renderReceipts(state.receiptsCache);
+      });
+    }
+
+    if (elements.receiptSearchClear) {
+      elements.receiptSearchClear.addEventListener("click", () => {
+        state.receiptSearchQuery = "";
+        if (elements.receiptSearch) {
+          elements.receiptSearch.value = "";
+        }
+        elements.receiptSearchClear.hidden = true;
+        renderReceipts(state.receiptsCache);
+      });
+    }
+
+    if (elements.receiptSort) {
+      elements.receiptSort.addEventListener("change", () => {
+        state.receiptSortKey = elements.receiptSort.value;
+        renderReceipts(state.receiptsCache);
+      });
+    }
+
+    if (elements.receiptGroupByName) {
+      elements.receiptGroupByName.addEventListener("change", () => {
+        state.receiptGroupByName = elements.receiptGroupByName.checked;
+        renderReceipts(state.receiptsCache);
+      });
+    }
+
     // Main page events
     if (elements.settingsToggle) {
       console.log('settingsToggle element:', elements.settingsToggle);
@@ -857,6 +893,7 @@ import {
 
   async function loadReceipts() {
     const receipts = await getAllReceipts();
+    // Default base order: newest first (used as tiebreaker before any sort)
     receipts.sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)));
     state.receiptsCache = receipts;
     refreshRunningTotalDisplay(receipts);
@@ -869,7 +906,68 @@ import {
     return receipts;
   }
 
-  function renderReceipts(receipts) {
+  // ── Filter / sort helpers ──────────────────────────────────────────────
+
+  function filterReceipts(receipts, query) {
+    if (!query) return receipts;
+    const q = query.toLowerCase().trim();
+    return receipts.filter((r) => {
+      return (
+        (r.locationName || "").toLowerCase().includes(q) ||
+        (r.licenseNumber || "").toLowerCase().includes(q) ||
+        (r.purchaseDate || "").includes(q) ||
+        (r.notes || "").toLowerCase().includes(q) ||
+        String(r.amountSpent || "").includes(q)
+      );
+    });
+  }
+
+  function sortReceipts(receipts, sortKey) {
+    const copy = receipts.slice();
+    switch (sortKey) {
+      case "date-asc":
+        copy.sort((a, b) => String(a.purchaseDate || "").localeCompare(String(b.purchaseDate || "")));
+        break;
+      case "date-desc":
+        copy.sort((a, b) => String(b.purchaseDate || "").localeCompare(String(a.purchaseDate || "")));
+        break;
+      case "name-asc":
+        copy.sort((a, b) => String(a.locationName || "").localeCompare(String(b.locationName || ""), undefined, { sensitivity: "base" }));
+        break;
+      case "name-desc":
+        copy.sort((a, b) => String(b.locationName || "").localeCompare(String(a.locationName || ""), undefined, { sensitivity: "base" }));
+        break;
+      case "amount-asc":
+        copy.sort((a, b) => Number.parseFloat(a.amountSpent || 0) - Number.parseFloat(b.amountSpent || 0));
+        break;
+      case "amount-desc":
+        copy.sort((a, b) => Number.parseFloat(b.amountSpent || 0) - Number.parseFloat(a.amountSpent || 0));
+        break;
+      default:
+        break;
+    }
+    return copy;
+  }
+
+  function buildGroupedRows(receipts) {
+    // Group by normalized dispensary name (case-insensitive)
+    const groups = new Map();
+    for (const r of receipts) {
+      const key = (r.locationName || "Unknown").trim();
+      const normKey = key.toLowerCase();
+      if (!groups.has(normKey)) {
+        groups.set(normKey, { label: key, receipts: [] });
+      }
+      groups.get(normKey).receipts.push(r);
+    }
+    return [...groups.values()].sort((a, b) =>
+      a.label.localeCompare(b.label, undefined, { sensitivity: "base" })
+    );
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────
+
+  function renderReceipts(allReceipts) {
     if (!elements.receiptRows || !elements.rowTemplate || !elements.recordCount || !elements.emptyState) {
       return;
     }
@@ -877,62 +975,122 @@ import {
     elements.receiptRows.innerHTML = "";
     clearThumbUrls();
 
-    elements.recordCount.textContent = `${receipts.length} receipt${receipts.length === 1 ? "" : "s"} saved`;
-    elements.emptyState.hidden = receipts.length > 0;
+    const query = state.receiptSearchQuery;
+    const filtered = filterReceipts(allReceipts, query);
+    const sorted = sortReceipts(filtered, state.receiptSortKey);
+    const groupByName = state.receiptGroupByName;
 
-    for (const receipt of receipts) {
-      const row = elements.rowTemplate.content.firstElementChild.cloneNode(true);
-      const image = row.querySelector(".thumb");
-      const locationCell = row.querySelector('[data-col="location"]');
-      const licenseCell = row.querySelector('[data-col="license"]');
-      const dateCell = row.querySelector('[data-col="date"]');
-      const timeCell = row.querySelector('[data-col="time"]');
-      const amountCell = row.querySelector('[data-col="amount"]');
-      const savedCell = row.querySelector('[data-col="saved"]');
-      const editButton = row.querySelector(".edit-btn");
-      const deleteButton = row.querySelector(".delete-btn");
+    const totalCount = allReceipts.length;
+    const shownCount = sorted.length;
 
-      if (receipt.imageBlob instanceof Blob) {
-        const thumbUrl = URL.createObjectURL(receipt.imageBlob);
-        state.thumbUrls.push(thumbUrl);
-        image.src = thumbUrl;
-        image.style.cursor = "zoom-in";
-        image.addEventListener("click", () => {
-          if (state.openImageModal) {
-            state.openImageModal(thumbUrl);
-          }
-        });
-      }
-
-      locationCell.textContent = receipt.locationName || "-";
-      if (licenseCell) {
-        licenseCell.textContent = receipt.licenseNumber || "-";
-      }
-      dateCell.textContent = receipt.purchaseDate || "-";
-      timeCell.textContent = receipt.purchaseTime || "-";
-      amountCell.textContent = `$${formatAmount(receipt.amountSpent)}`;
-      savedCell.textContent = formatSavedDate(receipt.createdAt);
-
-      if (editButton) {
-        editButton.addEventListener("click", () => {
-          onEditReceipt(receipt);
-        });
-      }
-
-      if (deleteButton) {
-        deleteButton.addEventListener("click", async () => {
-          const confirmed = window.confirm("Delete this receipt record?");
-          if (!confirmed) {
-            return;
-          }
-
-          await deleteReceipt(receipt._storeKey ?? receipt.id);
-          await loadReceipts();
-        });
-      }
-
-      elements.receiptRows.appendChild(row);
+    if (query) {
+      elements.recordCount.textContent = `${shownCount} of ${totalCount} receipt${totalCount === 1 ? "" : "s"} match`;
+    } else {
+      elements.recordCount.textContent = `${totalCount} receipt${totalCount === 1 ? "" : "s"} saved`;
     }
+
+    elements.emptyState.hidden = totalCount > 0;
+
+    if (totalCount === 0) {
+      return;
+    }
+
+    if (shownCount === 0) {
+      // Show inline no-results row
+      const noRow = document.createElement("tr");
+      noRow.className = "no-results-row";
+      const td = document.createElement("td");
+      td.colSpan = 8;
+      td.textContent = `No receipts match "${query}"`;
+      noRow.appendChild(td);
+      elements.receiptRows.appendChild(noRow);
+      return;
+    }
+
+    if (groupByName) {
+      const groups = buildGroupedRows(sorted);
+      for (const group of groups) {
+        // Group header row
+        const headerRow = document.createElement("tr");
+        headerRow.className = "group-header-row";
+        const headerTd = document.createElement("td");
+        headerTd.colSpan = 8;
+        const subtotal = group.receipts.reduce((sum, r) => sum + Number.parseFloat(r.amountSpent || 0), 0);
+        headerTd.innerHTML = `${escapeHtml(group.label)}<span class="group-subtotal">${group.receipts.length} receipt${group.receipts.length === 1 ? "" : "s"} &mdash; $${subtotal.toFixed(2)}</span>`;
+        headerRow.appendChild(headerTd);
+        elements.receiptRows.appendChild(headerRow);
+
+        for (const receipt of group.receipts) {
+          elements.receiptRows.appendChild(buildReceiptRow(receipt));
+        }
+      }
+    } else {
+      for (const receipt of sorted) {
+        elements.receiptRows.appendChild(buildReceiptRow(receipt));
+      }
+    }
+  }
+
+  function escapeHtml(str) {
+    return String(str || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function buildReceiptRow(receipt) {
+    const row = elements.rowTemplate.content.firstElementChild.cloneNode(true);
+    const image = row.querySelector(".thumb");
+    const locationCell = row.querySelector('[data-col="location"]');
+    const licenseCell = row.querySelector('[data-col="license"]');
+    const dateCell = row.querySelector('[data-col="date"]');
+    const timeCell = row.querySelector('[data-col="time"]');
+    const amountCell = row.querySelector('[data-col="amount"]');
+    const savedCell = row.querySelector('[data-col="saved"]');
+    const editButton = row.querySelector(".edit-btn");
+    const deleteButton = row.querySelector(".delete-btn");
+
+    if (receipt.imageBlob instanceof Blob) {
+      const thumbUrl = URL.createObjectURL(receipt.imageBlob);
+      state.thumbUrls.push(thumbUrl);
+      image.src = thumbUrl;
+      image.style.cursor = "zoom-in";
+      image.addEventListener("click", () => {
+        if (state.openImageModal) {
+          state.openImageModal(thumbUrl);
+        }
+      });
+    }
+
+    locationCell.textContent = receipt.locationName || "-";
+    if (licenseCell) {
+      licenseCell.textContent = receipt.licenseNumber || "-";
+    }
+    dateCell.textContent = receipt.purchaseDate || "-";
+    timeCell.textContent = receipt.purchaseTime || "-";
+    amountCell.textContent = `$${formatAmount(receipt.amountSpent)}`;
+    savedCell.textContent = formatSavedDate(receipt.createdAt);
+
+    if (editButton) {
+      editButton.addEventListener("click", () => {
+        onEditReceipt(receipt);
+      });
+    }
+
+    if (deleteButton) {
+      deleteButton.addEventListener("click", async () => {
+        const confirmed = window.confirm("Delete this receipt record?");
+        if (!confirmed) {
+          return;
+        }
+
+        await deleteReceipt(receipt._storeKey ?? receipt.id);
+        await loadReceipts();
+      });
+    }
+
+    return row;
   }
 
   function onEditReceipt(receipt) {

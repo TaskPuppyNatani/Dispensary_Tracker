@@ -297,6 +297,138 @@ textarea {
   gap: 0.8rem;
 }
 
+/* ── Records toolbar: search + sort/group controls ───────────────────── */
+.records-toolbar {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.records-search-wrap {
+  position: relative;
+  flex: 1 1 220px;
+  display: flex;
+  align-items: center;
+}
+
+.search-icon {
+  position: absolute;
+  left: 0.62rem;
+  width: 15px;
+  height: 15px;
+  color: var(--muted);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.records-search-wrap input[type="search"] {
+  padding-left: 2.1rem;
+  padding-right: 2rem;
+  width: 100%;
+  min-height: 36px;
+  font-size: 0.88rem;
+}
+
+.records-search-wrap input[type="search"]::-webkit-search-cancel-button {
+  display: none;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 0.45rem;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.15rem 0.3rem;
+  border-radius: 6px;
+}
+
+.search-clear-btn:hover {
+  color: var(--text);
+}
+
+.records-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.records-control-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.records-control-label span {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+  display: inline;
+}
+
+.records-control-label select {
+  width: auto;
+  min-height: 34px;
+  font-size: 0.82rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, black 9%);
+  color: var(--text);
+  border: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.records-group-label {
+  cursor: pointer;
+  user-select: none;
+}
+
+.records-group-label input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ── Dispensary group header rows ────────────────────────────────────── */
+.group-header-row td {
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line));
+  font-weight: 600;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  text-transform: uppercase;
+  padding: 0.42rem 0.48rem;
+}
+
+.group-header-row td span.group-subtotal {
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: 0.6rem;
+  font-size: 0.78rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* ── No-results state ────────────────────────────────────────────────── */
+.no-results-row td {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.88rem;
+  padding: 1.2rem 0.48rem;
+  font-style: italic;
+}
+
 .running-total-wrap {
   display: flex;
   justify-content: flex-end;
@@ -439,6 +571,21 @@ th {
     gap: 0.3rem;
   }
 
+  .records-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .records-search-wrap {
+    flex: none;
+  }
+
+  .records-controls {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.45rem;
+  }
+
   .table-wrap {
     overflow: visible;
   }
@@ -478,6 +625,27 @@ th {
 
   td:last-child {
     border-bottom: 0;
+  }
+
+  .group-header-row {
+    background: none;
+    border: none;
+    padding: 0;
+    margin-top: 0.5rem;
+  }
+
+  .group-header-row td {
+    border-radius: 8px;
+    justify-content: flex-start;
+    border-bottom: none;
+  }
+
+  .group-header-row td::before {
+    content: none;
+  }
+
+  .no-results-row td::before {
+    content: none;
   }
 
   td::before {

@@ -6,18 +6,27 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win"
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --win --mac --linux"
   },
   "devDependencies": {
-    "electron": "35.7.5"
+    "electron": "35.7.5",
+    "electron-builder": "^26.0.0"
   },
   "build": {
     "appId": "com.natani.dispensary-tracker",
     "productName": "Dispensary Tracker",
-    "forceCodeSigning": false,
     "directories": {
       "output": "dist"
     },
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!node_modules/**",
+      "!*.md"
+    ],
     "win": {
       "target": [
         {
@@ -27,11 +36,30 @@
       ],
       "icon": "assets/icon.ico"
     },
-    "files": [
-      "**/*",
-      "!dist/**",
-      "!node_modules/**",
-      "!*.md"
-    ]
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["universal"]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "identity": null,
+      "category": "public.app-category.finance"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.png",
+      "category": "Finance"
+    }
   }
 }

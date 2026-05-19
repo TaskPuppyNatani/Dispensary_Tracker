@@ -13,6 +13,10 @@ export const state = {
 	lastDetectedPhysicalAddress: "",
 	lastDispensaryLookupSource: "",
 	defaultLocationPlaceholder: "",
+	// Search / sort / group state
+	receiptSearchQuery: "",
+	receiptSortKey: "date-desc",
+	receiptGroupByName: false,
 };
 
 export const elements = {
@@ -38,6 +42,11 @@ export const elements = {
 	recordCount: document.getElementById("recordCount"),
 	emptyState: document.getElementById("emptyState"),
 	runningTotalLabel: document.getElementById("runningTotalLabel"),
+	// Search / sort / group controls
+	receiptSearch: document.getElementById("receiptSearch"),
+	receiptSearchClear: document.getElementById("receiptSearchClear"),
+	receiptSort: document.getElementById("receiptSort"),
+	receiptGroupByName: document.getElementById("receiptGroupByName"),
 
 	// Settings page elements
 	backBtn: document.getElementById("backBtn"),

@@ -98,6 +98,30 @@
           <h2>3. Saved Records</h2>
           <p id="recordCount" class="hint">0 receipts saved</p>
         </div>
+        <div class="records-toolbar">
+          <div class="records-search-wrap">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input id="receiptSearch" type="search" placeholder="Search receipts…" aria-label="Search saved receipts">
+            <button id="receiptSearchClear" class="search-clear-btn" type="button" aria-label="Clear search" hidden>&times;</button>
+          </div>
+          <div class="records-controls">
+            <label class="records-control-label" for="receiptSort">
+              <span>Sort</span>
+              <select id="receiptSort">
+                <option value="date-desc">Date (newest)</option>
+                <option value="date-asc">Date (oldest)</option>
+                <option value="name-asc">Dispensary (A–Z)</option>
+                <option value="name-desc">Dispensary (Z–A)</option>
+                <option value="amount-desc">Amount (high)</option>
+                <option value="amount-asc">Amount (low)</option>
+              </select>
+            </label>
+            <label class="records-control-label records-group-label">
+              <input id="receiptGroupByName" type="checkbox">
+              <span>Group by dispensary</span>
+            </label>
+          </div>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>

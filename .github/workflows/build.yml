@@ -1,0 +1,97 @@
+name: Build Distributables
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Windows (NSIS installer)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build Windows
+        run: npm run build:win
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dispensary-Tracker-Windows
+          path: dist/*.exe
+
+  build-mac:
+    name: macOS (Universal DMG)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build macOS
+        run: npm run build:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dispensary-Tracker-macOS
+          path: dist/*.dmg
+
+  build-linux:
+    name: Linux (AppImage + deb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Build Linux
+        run: npm run build:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Dispensary-Tracker-Linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-mac, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+
+      - name: Create or update release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "release-files/**/*"
+          tag: "latest"
+          name: "Latest Build"
+          body: |
+            Automatically built from the latest commit on `main`.
+
+            | Platform | File |
+            |----------|------|
+            | Windows  | `Dispensary-Tracker-Setup-*.exe` |
+            | macOS    | `Dispensary-Tracker-*.dmg` |
+            | Linux    | `Dispensary-Tracker-*.AppImage` / `*.deb` |
+          allowUpdates: true
+          removeArtifacts: true
+          makeLatest: true
+          token: ${{ secrets.GITHUB_TOKEN }}
