@@ -17,6 +17,8 @@ export const state = {
 	receiptSearchQuery: "",
 	receiptSortKey: "date-desc",
 	receiptGroupByName: false,
+	// Manual entry mode
+	isManualMode: false,
 };
 
 export const elements = {
@@ -47,6 +49,11 @@ export const elements = {
 	receiptSearchClear: document.getElementById("receiptSearchClear"),
 	receiptSort: document.getElementById("receiptSort"),
 	receiptGroupByName: document.getElementById("receiptGroupByName"),
+	// Manual entry mode
+	manualModeBtn: document.getElementById("manualModeBtn"),
+	manualTextInput: document.getElementById("manualTextInput"),
+	manualInputWrap: document.getElementById("manualInputWrap"),
+	scannerWrap: document.getElementById("scannerWrap"),
 
 	// Settings page elements
 	backBtn: document.getElementById("backBtn"),

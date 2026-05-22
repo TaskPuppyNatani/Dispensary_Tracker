@@ -25,7 +25,7 @@ import {
   updateReceiptRecord,
 } from "./db.js";
 import { onScanReceipt } from "./ocr.js";
-import { extractPhoneFromText } from "./matcher.js";
+import { extractPhoneFromText, parseTextForStore } from "./matcher.js";
 import { elements, state } from "./state.js";
 import {
   getClearAllErrorMessage,
@@ -315,8 +315,40 @@ import {
       elements.receiptInput.addEventListener("change", onReceiptSelected);
     }
 
+    if (elements.manualModeBtn) {
+      elements.manualModeBtn.addEventListener("click", () => {
+        state.isManualMode = !state.isManualMode;
+        const active = state.isManualMode;
+
+        if (elements.scannerWrap) {
+          elements.scannerWrap.hidden = active;
+        }
+        if (elements.manualInputWrap) {
+          elements.manualInputWrap.hidden = !active;
+        }
+        elements.manualModeBtn.textContent = active ? "Scan Mode" : "Manual Entry";
+        if (elements.scanBtn) {
+          elements.scanBtn.textContent = active ? "Process Text" : "Scan Receipt";
+        }
+
+        if (active) {
+          setStatus("Manual mode: paste address text and press Process Text.", "info");
+          if (elements.manualTextInput) {
+            elements.manualTextInput.focus();
+          }
+        } else {
+          setStatus("Waiting for image...");
+        }
+      });
+    }
+
     if (elements.scanBtn) {
       elements.scanBtn.addEventListener("click", async () => {
+        if (state.isManualMode) {
+          await onProcessManualText();
+          return;
+        }
+
         clearHistoryHints();
         await onScanReceipt({
           state,
@@ -626,6 +658,35 @@ import {
 
   function clearHistoryHints() {
     document.querySelectorAll(".history-hint").forEach((el) => el.remove());
+  }
+
+  async function onProcessManualText() {
+    const text = elements.manualTextInput ? elements.manualTextInput.value.trim() : "";
+    if (!text) {
+      setStatus("Paste or type receipt text before processing.", "warn");
+      return;
+    }
+
+    setStatus("Searching dispensary list...");
+    clearHistoryHints();
+    updateMatchConfidenceIndicator(null);
+
+    try {
+      const result = await parseTextForStore(text);
+      if (!result) {
+        setStatus("No matching dispensary found. Check that the text contains an Oregon address.", "error");
+        return;
+      }
+
+      fillReceiptForm({
+        locationName: result.Name,
+        licenseNumber: result.License,
+      });
+      setStatus("Dispensary matched. Verify the fields and complete the form.", "success");
+    } catch (error) {
+      console.error(error);
+      setStatus("Error during dispensary lookup. Please try again.", "error");
+    }
   }
 
   function fillReceiptForm(data) {

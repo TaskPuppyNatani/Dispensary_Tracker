@@ -38,16 +38,23 @@
       <section class="card reveal-up" style="--delay: 0.1s;">
         <h2>1. Add Receipt</h2>
         <p class="hint">Take a photo or upload an image, then scan to auto-fill fields.</p>
-        <label class="file-drop" for="receiptInput">
-          <input id="receiptInput" type="file" accept="image/*" capture="environment">
-          <span>Select Receipt Image</span>
-        </label>
+        <div id="scannerWrap">
+          <label class="file-drop" for="receiptInput">
+            <input id="receiptInput" type="file" accept="image/*" capture="environment">
+            <span>Select Receipt Image</span>
+          </label>
 
-        <div id="previewWrap" class="preview-wrap" hidden>
-          <img id="receiptPreview" alt="Receipt preview">
+          <div id="previewWrap" class="preview-wrap" hidden>
+            <img id="receiptPreview" alt="Receipt preview">
+          </div>
+        </div>
+
+        <div id="manualInputWrap" hidden>
+          <textarea id="manualTextInput" rows="6" placeholder="Paste or type receipt text containing an Oregon address (e.g. 510 NW 11th Ave Portland OR 97209)" style="width:100%;box-sizing:border-box;resize:vertical;"></textarea>
         </div>
 
         <div class="row-actions">
+          <button id="manualModeBtn" type="button" class="menu-btn">Manual Entry</button>
           <button id="scanBtn" type="button" class="accent-btn">Scan Receipt</button>
           <span id="scanStatus" class="status-text">Waiting for image...</span>
         </div>

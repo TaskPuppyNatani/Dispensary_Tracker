@@ -172,6 +172,28 @@ export async function findDispensaryMatchFromOcrText(text) {
   };
 }
 
+/**
+ * Searches rawText for a recognizable Oregon address and returns the matching
+ * dispensary record from the dispensary list.
+ *
+ * Completely independent of Tesseract/OCR — accepts any plain string.
+ *
+ * @param {string} rawText - Any string that may contain an Oregon address.
+ * @returns {Promise<{Name: string, Address: string, License: string}|null>}
+ *   The matched dispensary record, or null if no match exceeds the threshold.
+ */
+export async function parseTextForStore(rawText) {
+  const result = await findDispensaryMatchFromOcrText(rawText);
+  if (!result) {
+    return null;
+  }
+  return {
+    Name: result.name,
+    Address: result.matchedAddress,
+    License: result.licenseNumber,
+  };
+}
+
 function logTopMatchesForCandidate(bestMatch, scoredMatches) {
   if (!bestMatch || !Array.isArray(scoredMatches) || scoredMatches.length === 0) {
     return;
