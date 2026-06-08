@@ -365,6 +365,8 @@ import {
         // but whose address/name may still be mis-read. Runs before any fuzzy
         // matching so these stores are always filled in correctly.
         const ocrText = String(state.lastOcrText || "").toUpperCase();
+        const ocrMatchScore = Number.parseFloat(elements.matchConfidence?.dataset.score || "");
+        const shouldRunStoreAnchors = !Number.isFinite(ocrMatchScore) || ocrMatchScore < 0.50;
         const STORE_ANCHORS = [
           {
             test: (t) => t.includes("LA MOTA") || t.includes("1670315") || t.includes("1670316"),
@@ -372,16 +374,18 @@ import {
             licenseNumber: "050-10007012B21",
           },
         ];
-        for (const anchor of STORE_ANCHORS) {
-          if (anchor.test(ocrText)) {
-            console.log("[Store Anchor] Matched:", anchor.locationName);
-            if (elements.locationInput) {
-              elements.locationInput.value = anchor.locationName;
+        if (shouldRunStoreAnchors) {
+          for (const anchor of STORE_ANCHORS) {
+            if (anchor.test(ocrText)) {
+              console.log("[Store Anchor] Matched:", anchor.locationName);
+              if (elements.locationInput) {
+                elements.locationInput.value = anchor.locationName;
+              }
+              if (elements.licenseInput) {
+                elements.licenseInput.value = anchor.licenseNumber;
+              }
+              break;
             }
-            if (elements.licenseInput) {
-              elements.licenseInput.value = anchor.licenseNumber;
-            }
-            break;
           }
         }
         // --- END STORE ANCHORS ---
@@ -715,6 +719,8 @@ import {
     if (!elements.matchConfidence) {
       return;
     }
+
+    elements.matchConfidence.dataset.score = Number.isFinite(score) ? String(score) : "";
 
     if (!Number.isFinite(score)) {
       elements.matchConfidence.textContent = "";
