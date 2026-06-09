@@ -7,6 +7,9 @@ import {
   DISPENSARY_LIST_PATH,
   DISPENSARY_MATCH_THRESHOLD,
   LAST_BACKUP_KEY,
+  RECEIPT_INTELLIGENCE_ENABLED_DEFAULT,
+  RECEIPT_INTELLIGENCE_ENABLED_KEY,
+  RECEIPT_INTELLIGENCE_LOW_CONFIDENCE_THRESHOLD,
   REMINDER_DAYS,
   THEME_KEY,
 } from "./constants.js";
@@ -26,6 +29,8 @@ import {
 } from "./db.js";
 import { onScanReceipt } from "./ocr.js";
 import { extractPhoneFromText, parseTextForStore } from "./matcher.js";
+import { ReceiptIntelligenceService } from "./services/ReceiptIntelligenceService.js";
+import { NullProvider } from "./services/providers/NullProvider.js";
 import { elements, state } from "./state.js";
 import {
   getClearAllErrorMessage,
@@ -42,6 +47,12 @@ import {
 
 (() => {
   "use strict";
+
+  const receiptIntelligenceService = new ReceiptIntelligenceService({
+    provider: new NullProvider(),
+    featureEnabled: RECEIPT_INTELLIGENCE_ENABLED_DEFAULT,
+    lowConfidenceThreshold: RECEIPT_INTELLIGENCE_LOW_CONFIDENCE_THRESHOLD,
+  });
 
   console.log('🚀 App.js script loaded and executing!');
 
@@ -354,6 +365,7 @@ import {
           timestamp: new Date().toISOString(),
           detectedPhysicalAddress: "",
           lookupSource: "",
+          ocrConfidence: null,
           ocrInitial: null,
           postAnchor: null,
           postHistory: null,
@@ -375,6 +387,9 @@ import {
         scanTrace.detectedPhysicalAddress = String(state.lastDetectedPhysicalAddress || "");
         scanTrace.lookupSource = String(state.lastDispensaryLookupSource || "");
         scanTrace.ocrInitial = readCurrentScanSnapshot();
+        scanTrace.ocrConfidence = scanTrace.ocrInitial && Number.isFinite(scanTrace.ocrInitial.confidence)
+          ? scanTrace.ocrInitial.confidence
+          : null;
         logTraceStage("ocr_initial", scanTrace, scanTrace.ocrInitial);
 
         // --- STORE ANCHORS ---
@@ -497,6 +512,21 @@ import {
         scanTrace.finalRendered = readCurrentScanSnapshot();
         logTraceStage("final_rendered", scanTrace, scanTrace.finalRendered);
         state.lastReceiptDecisionTrace = scanTrace;
+
+        const receiptIntelligenceEnabled = isReceiptIntelligenceEnabled();
+        const intelligenceResult = await receiptIntelligenceService.analyze(scanTrace, {
+          featureEnabled: receiptIntelligenceEnabled,
+          confidence: scanTrace.ocrConfidence,
+        });
+        state.lastReceiptIntelligenceResult = intelligenceResult;
+        console.info("[Receipt Intelligence]", {
+          traceId: scanTrace.traceId,
+          enabled: receiptIntelligenceEnabled,
+          status: intelligenceResult.status,
+          reason: intelligenceResult.reason,
+          eligible: intelligenceResult.eligible,
+        });
+
         console.debug("[Trace] Receipt decision trace captured:", scanTrace);
 
         // Snapshot the final auto-filled name so onSaveReceipt can detect
@@ -697,6 +727,14 @@ import {
       return window.crypto.randomUUID();
     }
     return `trace-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+  }
+
+  function isReceiptIntelligenceEnabled() {
+    const raw = localStorage.getItem(RECEIPT_INTELLIGENCE_ENABLED_KEY);
+    if (raw === null) {
+      return RECEIPT_INTELLIGENCE_ENABLED_DEFAULT;
+    }
+    return raw === "1" || raw.toLowerCase() === "true";
   }
 
   function readCurrentScanSnapshot() {

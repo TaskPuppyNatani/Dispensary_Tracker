@@ -15,3 +15,7 @@ export const REMINDER_DAYS = 7;
 export const DISPENSARY_LIST_PATH = "./assets/dispensaries.json";
 export const DISPENSARY_LIST_FALLBACK_PATH = "./assets/dispensary_list/dispensaries.json";
 export const DISPENSARY_MATCH_THRESHOLD = 0.85;
+
+export const RECEIPT_INTELLIGENCE_ENABLED_KEY = "receipt_intelligence_enabled";
+export const RECEIPT_INTELLIGENCE_ENABLED_DEFAULT = false;
+export const RECEIPT_INTELLIGENCE_LOW_CONFIDENCE_THRESHOLD = 0.5;
