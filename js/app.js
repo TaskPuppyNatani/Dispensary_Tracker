@@ -349,6 +349,17 @@ import {
           return;
         }
 
+        const scanTrace = {
+          traceId: createTraceId(),
+          timestamp: new Date().toISOString(),
+          detectedPhysicalAddress: "",
+          lookupSource: "",
+          ocrInitial: null,
+          postAnchor: null,
+          postHistory: null,
+          finalRendered: null,
+        };
+
         clearHistoryHints();
         await onScanReceipt({
           state,
@@ -359,6 +370,10 @@ import {
           getDispensaryName,
           setMatchConfidence: updateMatchConfidenceIndicator,
         });
+
+        scanTrace.detectedPhysicalAddress = String(state.lastDetectedPhysicalAddress || "");
+        scanTrace.lookupSource = String(state.lastDispensaryLookupSource || "");
+        scanTrace.ocrInitial = readCurrentScanSnapshot();
 
         // --- STORE ANCHORS ---
         // Hard-coded overrides for stores whose OCR text is reliably identifiable
@@ -388,6 +403,7 @@ import {
             }
           }
         }
+        scanTrace.postAnchor = readCurrentScanSnapshot();
         // --- END STORE ANCHORS ---
 
         const detectedAddress = state.lastDetectedPhysicalAddress;
@@ -470,6 +486,13 @@ import {
             }
           }
         }
+
+        scanTrace.postHistory = readCurrentScanSnapshot();
+        scanTrace.detectedPhysicalAddress = String(state.lastDetectedPhysicalAddress || "");
+        scanTrace.lookupSource = String(state.lastDispensaryLookupSource || "");
+        scanTrace.finalRendered = readCurrentScanSnapshot();
+        state.lastReceiptDecisionTrace = scanTrace;
+        console.debug("[Trace] Receipt decision trace captured:", scanTrace);
 
         // Snapshot the final auto-filled name so onSaveReceipt can detect
         // whether the user manually edited it before saving.
@@ -662,6 +685,25 @@ import {
 
   function clearHistoryHints() {
     document.querySelectorAll(".history-hint").forEach((el) => el.remove());
+  }
+
+  function createTraceId() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return window.crypto.randomUUID();
+    }
+    return `trace-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+  }
+
+  function readCurrentScanSnapshot() {
+    const confidenceValue = Number.parseFloat(elements.matchConfidence?.dataset.score || "");
+    return {
+      location: elements.locationInput ? elements.locationInput.value.trim() : "",
+      license: elements.licenseInput ? elements.licenseInput.value.trim() : "",
+      date: elements.dateInput ? elements.dateInput.value.trim() : "",
+      time: elements.timeInput ? elements.timeInput.value.trim() : "",
+      amount: elements.amountInput ? elements.amountInput.value.trim() : "",
+      confidence: Number.isFinite(confidenceValue) ? confidenceValue : null,
+    };
   }
 
   async function onProcessManualText() {
