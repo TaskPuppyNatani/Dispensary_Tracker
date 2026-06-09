@@ -398,7 +398,8 @@ import {
         // matching so these stores are always filled in correctly.
         const ocrText = String(state.lastOcrText || "").toUpperCase();
         const ocrMatchScore = Number.parseFloat(elements.matchConfidence?.dataset.score || "");
-        const shouldRunStoreAnchors = !Number.isFinite(ocrMatchScore) || ocrMatchScore < 0.50;
+        const hasResolvedLocation = Boolean(scanTrace.ocrInitial && String(scanTrace.ocrInitial.location || "").trim());
+        const shouldRunStoreAnchors = !hasResolvedLocation && (!Number.isFinite(ocrMatchScore) || ocrMatchScore < 0.50);
         const STORE_ANCHORS = [
           {
             test: (t) => t.includes("LA MOTA") || t.includes("1670315") || t.includes("1670316"),

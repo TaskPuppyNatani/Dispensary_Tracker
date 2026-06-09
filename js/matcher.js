@@ -150,6 +150,22 @@ export async function findDispensaryMatchFromOcrText(text) {
 
   logTopMatchesForCandidate(bestMatch, scoredMatches);
 
+  if (bestMatch && bestMatch.candidate && bestMatch.entry) {
+    const diagnostics = getAddressScoreDiagnostics(bestMatch.candidate, bestMatch.entry);
+    const accepted = bestMatch.score >= DISPENSARY_MATCH_THRESHOLD;
+    console.info("[Matcher Diagnostics]", {
+      rawCandidate: bestMatch.candidate.raw,
+      normalizedCandidate: bestMatch.candidate.normalizedAddress,
+      bestDispensaryName: bestMatch.entry.name,
+      bestDispensaryAddressRaw: bestMatch.entry.address,
+      bestDispensaryAddressNormalized: bestMatch.entry.normalizedAddress,
+      finalSimilarityScore: Number(bestMatch.score),
+      scoreComponents: diagnostics,
+      threshold: DISPENSARY_MATCH_THRESHOLD,
+      accepted,
+    });
+  }
+
   if (!bestMatch || bestMatch.score < DISPENSARY_MATCH_THRESHOLD) {
     return null;
   }
@@ -273,6 +289,31 @@ function extractZipAnchoredSnippet(text) {
   return snippet;
 }
 
+function hasCompletedCityStateZip(candidate) {
+  const normalized = normalizeAddressForLookup(candidate);
+  if (!normalized) {
+    return false;
+  }
+  return /\b[A-Z][A-Z .'-]{1,40}\s+OR\s+97\d{3}(?:-\d{4})?\b/.test(normalized);
+}
+
+function isStrongNonAddressLine(line) {
+  const value = String(line || "").toUpperCase();
+  if (!value) {
+    return false;
+  }
+
+  const patterns = [
+    /\b(?:JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|SEPT|OCT|NOV|DEC|JANUARY|FEBRUARY|MARCH|APRIL|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER)\b/,
+    /\b(?:AM|PM|AH|PH)\b/,
+    /\b\d{1,2}[:.]\d{2}\b/,
+    /\b(?:REGISTER|TRANSACTION|RECEIPT|INVOICE|ORDER|SUBTOTAL|TOTAL|TAX|CHANGE|AUTH|APPROVAL|CARD|CASH|SKU|QTY)\b/,
+    /\b(?:LANE|TILL|TERMINAL)\s*\d+\b/,
+  ];
+
+  return patterns.some((pattern) => pattern.test(value));
+}
+
 function extractAddressCandidatesFromText(text) {
   const preCleanedText = preCleanOcrTextForMatching(text);
   const lines = String(preCleanedText || "")
@@ -313,14 +354,30 @@ function extractAddressCandidatesFromText(text) {
   }
 
   for (let index = 0; index < lines.length; index += 1) {
-    addCandidate(lines[index]);
+    const line1 = lines[index];
+    addCandidate(line1);
 
-    if (index + 1 < lines.length) {
-      addCandidate(`${lines[index]} ${lines[index + 1]}`);
+    if (hasCompletedCityStateZip(line1)) {
+      continue;
     }
 
-    if (index + 2 < lines.length) {
-      addCandidate(`${lines[index]} ${lines[index + 1]} ${lines[index + 2]}`);
+    if (index + 1 < lines.length) {
+      const line2 = lines[index + 1];
+      if (!isStrongNonAddressLine(line2)) {
+        const twoLineCandidate = `${line1} ${line2}`;
+        addCandidate(twoLineCandidate);
+
+        if (hasCompletedCityStateZip(twoLineCandidate)) {
+          continue;
+        }
+
+        if (index + 2 < lines.length) {
+          const line3 = lines[index + 2];
+          if (!isStrongNonAddressLine(line3)) {
+            addCandidate(`${twoLineCandidate} ${line3}`);
+          }
+        }
+      }
     }
   }
 
@@ -497,6 +554,56 @@ function scoreAddressCandidate(candidate, entry) {
   }
 
   return Math.max(0, Math.min(1, score));
+}
+
+function getAddressScoreDiagnostics(candidate, entry) {
+  const withZip = stringSimilarity(candidate.normalizedAddress, entry.normalizedAddress);
+  const withoutZip = stringSimilarity(candidate.normalizedAddressNoZip, entry.normalizedAddressNoZip);
+  const textScore = Math.max(withZip, withoutZip);
+  const tokenScore = tokenSetSimilarity(candidate.tokens, entry.tokens);
+
+  let rawScore = (textScore * 0.72) + (tokenScore * 0.28);
+  let streetNumberPenaltyApplied = false;
+
+  if (candidate.firstNumber && entry.firstNumber && candidate.firstNumber !== entry.firstNumber) {
+    rawScore -= 0.08;
+    streetNumberPenaltyApplied = true;
+  }
+
+  let containmentBoostApplied = false;
+  let containmentBoostScore = rawScore;
+  if (
+    candidate.normalizedAddressNoZip &&
+    entry.normalizedAddressNoZip &&
+    (candidate.normalizedAddressNoZip.includes(entry.normalizedAddressNoZip) ||
+      entry.normalizedAddressNoZip.includes(candidate.normalizedAddressNoZip))
+  ) {
+    containmentBoostScore = (textScore * 0.8) + (tokenScore * 0.2);
+    if (containmentBoostScore > rawScore) {
+      containmentBoostApplied = true;
+      rawScore = containmentBoostScore;
+    }
+  }
+
+  let exactMatchOverrideApplied = false;
+  if (candidate.normalizedAddress === entry.normalizedAddress) {
+    rawScore = 1;
+    exactMatchOverrideApplied = true;
+  }
+
+  const finalScore = Math.max(0, Math.min(1, rawScore));
+
+  return {
+    withZipLevenshteinScore: withZip,
+    withoutZipLevenshteinScore: withoutZip,
+    textScore,
+    tokenOverlapScore: tokenScore,
+    streetNumberPenaltyApplied,
+    containmentBoostApplied,
+    containmentBoostScore,
+    exactMatchOverrideApplied,
+    finalScore,
+  };
 }
 
 function tokenSetSimilarity(leftTokens, rightTokens) {
