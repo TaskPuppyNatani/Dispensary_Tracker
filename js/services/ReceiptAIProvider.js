@@ -31,7 +31,12 @@ export class ReceiptAIProvider {
  * @param {any} provider
  */
 export function assertReceiptAIProvider(provider) {
-  if (!provider || typeof provider.analyze !== "function") {
-    throw new Error("Invalid ReceiptAIProvider: missing analyze(trace, context) method.");
+  const hasAnalyze = !!provider && typeof provider.analyze === "function";
+  const hasName = !!provider && typeof provider.name === "string" && provider.name.trim().length > 0;
+
+  if (!hasName || !hasAnalyze) {
+    throw new Error(
+      "Invalid ReceiptAIProvider: providers must expose a non-empty name and analyze(trace, context)."
+    );
   }
 }
