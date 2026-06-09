@@ -359,6 +359,7 @@ import {
           postHistory: null,
           finalRendered: null,
         };
+        logTraceStage("trace_created", scanTrace, null);
 
         clearHistoryHints();
         await onScanReceipt({
@@ -374,6 +375,7 @@ import {
         scanTrace.detectedPhysicalAddress = String(state.lastDetectedPhysicalAddress || "");
         scanTrace.lookupSource = String(state.lastDispensaryLookupSource || "");
         scanTrace.ocrInitial = readCurrentScanSnapshot();
+        logTraceStage("ocr_initial", scanTrace, scanTrace.ocrInitial);
 
         // --- STORE ANCHORS ---
         // Hard-coded overrides for stores whose OCR text is reliably identifiable
@@ -404,6 +406,7 @@ import {
           }
         }
         scanTrace.postAnchor = readCurrentScanSnapshot();
+        logTraceStage("post_anchor", scanTrace, scanTrace.postAnchor);
         // --- END STORE ANCHORS ---
 
         const detectedAddress = state.lastDetectedPhysicalAddress;
@@ -488,9 +491,11 @@ import {
         }
 
         scanTrace.postHistory = readCurrentScanSnapshot();
+        logTraceStage("post_history", scanTrace, scanTrace.postHistory);
         scanTrace.detectedPhysicalAddress = String(state.lastDetectedPhysicalAddress || "");
         scanTrace.lookupSource = String(state.lastDispensaryLookupSource || "");
         scanTrace.finalRendered = readCurrentScanSnapshot();
+        logTraceStage("final_rendered", scanTrace, scanTrace.finalRendered);
         state.lastReceiptDecisionTrace = scanTrace;
         console.debug("[Trace] Receipt decision trace captured:", scanTrace);
 
@@ -705,6 +710,92 @@ import {
       confidence: Number.isFinite(confidenceValue) ? confidenceValue : null,
     };
   }
+
+  function logTraceStage(stage, trace, snapshot = null) {
+    if (!trace || typeof trace !== "object") {
+      return;
+    }
+
+    const payload = {
+      traceId: String(trace.traceId || ""),
+      stage,
+      confidence: snapshot && Object.prototype.hasOwnProperty.call(snapshot, "confidence") ? snapshot.confidence : null,
+      location: snapshot && Object.prototype.hasOwnProperty.call(snapshot, "location") ? snapshot.location : "",
+      license: snapshot && Object.prototype.hasOwnProperty.call(snapshot, "license") ? snapshot.license : "",
+      lookupSource: String(trace.lookupSource || ""),
+      detectedPhysicalAddress: String(trace.detectedPhysicalAddress || ""),
+    };
+
+    console.info("[Trace]", payload);
+  }
+
+  function analyzeLatestReceiptDecisionTrace(trace = state.lastReceiptDecisionTrace) {
+    if (!trace || typeof trace !== "object") {
+      return {
+        ok: false,
+        reason: "no_trace_available",
+      };
+    }
+
+    const stages = [
+      { key: "ocrInitial", label: "ocrInitial" },
+      { key: "postAnchor", label: "postAnchor" },
+      { key: "postHistory", label: "postHistory" },
+      { key: "finalRendered", label: "finalRendered" },
+    ];
+
+    const stageValues = stages.map(({ key, label }) => {
+      const snapshot = trace[key] && typeof trace[key] === "object" ? trace[key] : {};
+      return {
+        stage: label,
+        location: String(snapshot.location || ""),
+        license: String(snapshot.license || ""),
+      };
+    });
+
+    const locationChanges = [];
+    const licenseChanges = [];
+
+    for (let index = 1; index < stageValues.length; index += 1) {
+      const prev = stageValues[index - 1];
+      const curr = stageValues[index];
+
+      if (prev.location !== curr.location) {
+        locationChanges.push({
+          fromStage: prev.stage,
+          toStage: curr.stage,
+          from: prev.location,
+          to: curr.location,
+        });
+      }
+
+      if (prev.license !== curr.license) {
+        licenseChanges.push({
+          fromStage: prev.stage,
+          toStage: curr.stage,
+          from: prev.license,
+          to: curr.license,
+        });
+      }
+    }
+
+    const report = {
+      ok: true,
+      traceId: String(trace.traceId || ""),
+      timestamp: String(trace.timestamp || ""),
+      locationChanged: locationChanges.length > 0,
+      licenseChanged: licenseChanges.length > 0,
+      locationChanges,
+      licenseChanges,
+      firstLocationChangeStage: locationChanges.length > 0 ? locationChanges[0].toStage : null,
+      firstLicenseChangeStage: licenseChanges.length > 0 ? licenseChanges[0].toStage : null,
+    };
+
+    console.info("[Trace Analysis]", report);
+    return report;
+  }
+
+  window.analyzeLatestReceiptDecisionTrace = analyzeLatestReceiptDecisionTrace;
 
   async function onProcessManualText() {
     const text = elements.manualTextInput ? elements.manualTextInput.value.trim() : "";
