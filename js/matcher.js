@@ -332,11 +332,11 @@ function extractAddressCandidatesFromText(text) {
 }
 
 function looksLikeOregonAddress(value) {
-  const hasState = /\bOR\b/.test(value);
+  const hasState = /\b(?:OR|OREGON)\b/.test(value);
   const hasStreetNumber = /\b\d{1,6}[A-Z]?\b/.test(value);
   const hasStreetType = /\b(ST|AVE|BLVD|RD|DR|LN|HWY|PL|CT|PKWY|TER|WAY)\b/.test(value);
-  const hasZip = /\b\d{5}(?:-\d{4})?\b/.test(value);
-  return hasState && hasStreetNumber && (hasStreetType || hasZip);
+  const hasCityStateWithOregonZip97xxx = /\b[A-Z][A-Z .'-]{1,40}\s+(?:OR|OREGON)\s+97\d{3}(?:-\d{4})?\b/.test(value);
+  return hasState && hasStreetNumber && (hasStreetType || hasCityStateWithOregonZip97xxx);
 }
 
 export function normalizeAddressForLookup(value) {
