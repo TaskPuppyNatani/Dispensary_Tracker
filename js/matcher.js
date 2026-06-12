@@ -323,24 +323,44 @@ function extractAddressCandidatesFromText(text) {
 
   const candidates = [];
   const seen = new Set();
+  const generatedCandidateStrings = [];
+  const passedCandidates = [];
+  const rejectedCandidates = [];
 
   const addCandidate = (rawValue) => {
+    const rawCandidate = String(rawValue || "").trim();
+    if (!rawCandidate) {
+      return;
+    }
+
+    generatedCandidateStrings.push(rawCandidate);
+
     const normalizedAddress = normalizeAddressForLookup(rawValue);
     if (!normalizedAddress || seen.has(normalizedAddress)) {
       return;
     }
 
     if (!looksLikeOregonAddress(normalizedAddress)) {
+      rejectedCandidates.push({
+        raw: rawCandidate,
+        normalizedAddress,
+      });
       return;
     }
 
     const normalizedAddressNoZip = stripAddressZip(normalizedAddress);
-    candidates.push({
+    const candidate = {
       raw: rawValue,
       normalizedAddress,
       normalizedAddressNoZip,
       firstNumber: extractLeadingAddressNumber(normalizedAddress),
       tokens: tokenizeAddress(normalizedAddressNoZip),
+    };
+
+    candidates.push(candidate);
+    passedCandidates.push({
+      raw: rawCandidate,
+      normalizedAddress,
     });
     seen.add(normalizedAddress);
   };
@@ -384,6 +404,18 @@ function extractAddressCandidatesFromText(text) {
   if (candidates.length === 0 && lines.length > 0) {
     addCandidate(lines.join(" "));
   }
+
+  console.info("[Matcher Diagnostics] Address candidates generated (pre-filter)", {
+    generatedCount: generatedCandidateStrings.length,
+    candidates: generatedCandidateStrings,
+  });
+
+  console.info("[Matcher Diagnostics] Address candidates filtering result", {
+    passedCount: passedCandidates.length,
+    rejectedCount: rejectedCandidates.length,
+    passed: passedCandidates,
+    rejected: rejectedCandidates,
+  });
 
   return candidates;
 }
