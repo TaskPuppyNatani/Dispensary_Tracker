@@ -1,6 +1,27 @@
 import { assertReceiptAIProvider } from "./ReceiptAIProvider.js";
 import { NullProvider } from "./providers/NullProvider.js";
 
+const SERVICE_STATUSES = new Set(["skipped", "noop", "error"]);
+const SERVICE_REASONS = new Set([
+  "feature_disabled",
+  "high_confidence",
+  "no_confidence",
+  "low_confidence_path",
+  "provider_noop",
+  "provider_error",
+  "invalid_trace",
+]);
+
+function normalizeServiceStatus(status, fallback = "noop") {
+  const normalized = String(status || "").trim();
+  return SERVICE_STATUSES.has(normalized) ? normalized : fallback;
+}
+
+function normalizeServiceReason(reason, fallback = "provider_noop") {
+  const normalized = String(reason || "").trim();
+  return SERVICE_REASONS.has(normalized) ? normalized : fallback;
+}
+
 /**
  * Phase 1 service scaffold.
  *
@@ -46,9 +67,11 @@ export class ReceiptIntelligenceService {
     const hasConfidence = Number.isFinite(confidence);
     const isLowConfidence = !hasConfidence || confidence < threshold;
 
-    let reason = "eligible";
+    let reason = "low_confidence_path";
     if (!featureEnabled) {
       reason = "feature_disabled";
+    } else if (!hasConfidence) {
+      reason = "no_confidence";
     } else if (!isLowConfidence) {
       reason = "high_confidence";
     }
@@ -63,10 +86,31 @@ export class ReceiptIntelligenceService {
     };
   }
 
+  logEvent(eventName, payload = {}) {
+    const logger = this.logger;
+    if (!logger) {
+      return;
+    }
+
+    if (typeof logger.info === "function") {
+      logger.info(eventName, payload);
+      return;
+    }
+
+    if (typeof logger.log === "function") {
+      logger.log(eventName, payload);
+    }
+  }
+
   async analyze(trace, options = {}) {
     const startedAt = Date.now();
 
     if (!trace || typeof trace !== "object") {
+      this.logEvent("receipt_intelligence.result", {
+        status: "error",
+        reason: "invalid_trace",
+        providerName: this.provider.name,
+      });
       return {
         status: "error",
         reason: "invalid_trace",
@@ -80,7 +124,22 @@ export class ReceiptIntelligenceService {
     }
 
     const eligibility = this.evaluateEligibility(trace, options);
+    this.logEvent("receipt_intelligence.gate_evaluated", {
+      traceId: String(trace.traceId || ""),
+      featureEnabled: eligibility.featureEnabled,
+      confidence: eligibility.confidence,
+      threshold: eligibility.lowConfidenceThreshold,
+      eligible: eligibility.eligible,
+      reason: eligibility.reason,
+    });
+
     if (!eligibility.eligible) {
+      this.logEvent("receipt_intelligence.result", {
+        traceId: String(trace.traceId || ""),
+        status: "skipped",
+        reason: eligibility.reason,
+        providerName: this.provider.name,
+      });
       return {
         status: "skipped",
         reason: eligibility.reason,
@@ -95,17 +154,34 @@ export class ReceiptIntelligenceService {
     }
 
     try {
+      this.logEvent("receipt_intelligence.provider_invoked", {
+        traceId: String(trace.traceId || ""),
+        providerName: this.provider.name,
+      });
+
       const providerResult = await this.provider.analyze(trace, {
         gate: eligibility,
       });
 
+      const status = normalizeServiceStatus(providerResult && providerResult.status, "noop");
+      const reason = normalizeServiceReason(
+        providerResult && providerResult.reason,
+        status === "error" ? "provider_error" : "provider_noop"
+      );
       const suggestions = Array.isArray(providerResult && providerResult.suggestions)
         ? providerResult.suggestions
         : [];
 
+      this.logEvent("receipt_intelligence.result", {
+        traceId: String(trace.traceId || ""),
+        status,
+        reason,
+        providerName: this.provider.name,
+      });
+
       return {
-        status: providerResult && providerResult.status ? providerResult.status : "noop",
-        reason: providerResult && providerResult.reason ? providerResult.reason : "provider_noop",
+        status,
+        reason,
         eligible: true,
         suggestions,
         metadata: {
@@ -119,6 +195,13 @@ export class ReceiptIntelligenceService {
       if (this.logger && typeof this.logger.warn === "function") {
         this.logger.warn("[ReceiptIntelligenceService] Provider analyze failed:", error);
       }
+
+      this.logEvent("receipt_intelligence.result", {
+        traceId: String(trace.traceId || ""),
+        status: "error",
+        reason: "provider_error",
+        providerName: this.provider.name,
+      });
 
       return {
         status: "error",

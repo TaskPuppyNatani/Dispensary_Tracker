@@ -363,6 +363,8 @@ import {
         const scanTrace = {
           traceId: createTraceId(),
           timestamp: new Date().toISOString(),
+          scanMode: "scan",
+          rawOcrTextAvailable: false,
           detectedPhysicalAddress: "",
           lookupSource: "",
           ocrConfidence: null,
@@ -386,6 +388,7 @@ import {
 
         scanTrace.detectedPhysicalAddress = String(state.lastDetectedPhysicalAddress || "");
         scanTrace.lookupSource = String(state.lastDispensaryLookupSource || "");
+        scanTrace.rawOcrTextAvailable = String(state.lastOcrText || "").trim().length > 0;
         scanTrace.ocrInitial = readCurrentScanSnapshot();
         scanTrace.ocrConfidence = scanTrace.ocrInitial && Number.isFinite(scanTrace.ocrInitial.confidence)
           ? scanTrace.ocrInitial.confidence
@@ -520,7 +523,7 @@ import {
           confidence: scanTrace.ocrConfidence,
         });
         state.lastReceiptIntelligenceResult = intelligenceResult;
-        console.info("[Receipt Intelligence]", {
+        console.info("receipt_intelligence.result", {
           traceId: scanTrace.traceId,
           enabled: receiptIntelligenceEnabled,
           status: intelligenceResult.status,
@@ -528,7 +531,12 @@ import {
           eligible: intelligenceResult.eligible,
         });
 
-        console.debug("[Trace] Receipt decision trace captured:", scanTrace);
+        console.debug("receipt_intelligence.trace_captured", {
+          traceId: scanTrace.traceId,
+          stage: "all",
+          scanMode: scanTrace.scanMode,
+          rawOcrTextAvailable: scanTrace.rawOcrTextAvailable,
+        });
 
         // Snapshot the final auto-filled name so onSaveReceipt can detect
         // whether the user manually edited it before saving.
@@ -758,6 +766,8 @@ import {
     const payload = {
       traceId: String(trace.traceId || ""),
       stage,
+      scanMode: String(trace.scanMode || "scan"),
+      rawOcrTextAvailable: Boolean(trace.rawOcrTextAvailable),
       confidence: snapshot && Object.prototype.hasOwnProperty.call(snapshot, "confidence") ? snapshot.confidence : null,
       location: snapshot && Object.prototype.hasOwnProperty.call(snapshot, "location") ? snapshot.location : "",
       license: snapshot && Object.prototype.hasOwnProperty.call(snapshot, "license") ? snapshot.license : "",
@@ -765,7 +775,7 @@ import {
       detectedPhysicalAddress: String(trace.detectedPhysicalAddress || ""),
     };
 
-    console.info("[Trace]", payload);
+    console.info("receipt_intelligence.trace_captured", payload);
   }
 
   function analyzeLatestReceiptDecisionTrace(trace = state.lastReceiptDecisionTrace) {
