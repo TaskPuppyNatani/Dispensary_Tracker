@@ -1,5 +1,33 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
+const { createLocalAISettings, resolveModelDirectory } = require("./local-ai/config.js");
+const { ModelManager } = require("./local-ai/ModelManager.js");
+
+let modelManager = null;
+
+function getModelManager() {
+  if (!modelManager) {
+    const localAISettings = createLocalAISettings();
+    const modelRootPath = resolveModelDirectory(localAISettings, __dirname);
+    modelManager = new ModelManager({ modelRootPath });
+  }
+
+  return modelManager;
+}
+
+function registerLocalAIHandlers() {
+  ipcMain.handle("localAI:listModels", async () => {
+    return await getModelManager().listModels();
+  });
+
+  ipcMain.handle("localAI:getModelMetadata", async (_event, modelId) => {
+    return await getModelManager().getModelMetadata(String(modelId || ""));
+  });
+
+  ipcMain.handle("localAI:getInstallationStatus", async (_event, modelId) => {
+    return await getModelManager().getInstallationStatus(String(modelId || ""));
+  });
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -20,6 +48,7 @@ function createWindow() {
 
       // Allow Web Workers to be created from file:// URLs (needed for Tesseract).
       allowRunningInsecureContent: false,
+      preload: path.join(__dirname, "preload.js"),
     },
   });
 
@@ -27,6 +56,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  registerLocalAIHandlers();
   createWindow();
 
   // On macOS re-create the window when the dock icon is clicked and no

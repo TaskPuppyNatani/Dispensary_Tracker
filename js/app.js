@@ -846,6 +846,17 @@ import {
 
   window.analyzeLatestReceiptDecisionTrace = analyzeLatestReceiptDecisionTrace;
 
+  window.smokeTestLocalAI = async function smokeTestLocalAI() {
+    if (!window.localAI || typeof window.localAI.listModels !== "function") {
+      console.warn("[LocalAI Smoke] window.localAI is unavailable.");
+      return [];
+    }
+
+    const models = await window.localAI.listModels();
+    console.info("[LocalAI Smoke]", models);
+    return models;
+  };
+
   async function onProcessManualText() {
     const text = elements.manualTextInput ? elements.manualTextInput.value.trim() : "";
     if (!text) {

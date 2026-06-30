@@ -2,7 +2,6 @@
 
 const fs = require("fs/promises");
 const path = require("path");
-const { DEFAULT_LOCAL_AI_SETTINGS, resolveModelDirectory } = require("./config.js");
 
 require("./modelTypes.js");
 
@@ -21,15 +20,14 @@ const STATUS = Object.freeze({
 
 class ModelManager {
   constructor(options = {}) {
-    this.baseDirectory = options.baseDirectory || process.cwd();
-    this.modelDirectory = options.modelDirectory || DEFAULT_LOCAL_AI_SETTINGS.modelDirectory;
+    this.modelRootPath = path.resolve(String(options.modelRootPath || options.modelDirectory || path.join(process.cwd(), "models")));
     this.metadataFileNames = Array.isArray(options.metadataFileNames) && options.metadataFileNames.length > 0
       ? options.metadataFileNames.map((name) => String(name)).filter(Boolean)
       : Array.from(DEFAULT_METADATA_FILENAMES);
   }
 
   getModelRoot() {
-    return resolveModelDirectory({ modelDirectory: this.modelDirectory }, this.baseDirectory);
+    return this.modelRootPath;
   }
 
   async listModels() {
