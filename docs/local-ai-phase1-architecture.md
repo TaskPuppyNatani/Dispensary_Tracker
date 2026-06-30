@@ -20,7 +20,7 @@ loading, ONNX Runtime integration, downloads, or inference execution.
   - JSDoc typedefs for model metadata, validation, artifact summaries, and
     installation status results.
 - `local-ai/VisionRuntime.js`
-  - Stub boundary for future inference runtime integrations.
+  - Minimal contract for future inference runtime integrations.
   - Does not import ONNX Runtime or execute models.
 - `js/services/vision/ReceiptVisionProvider.js`
   - Receipt-domain provider contract for future vision analysis.
@@ -50,12 +50,18 @@ load artifacts or inspect model internals.
 `ReceiptVisionProvider` is the receipt-domain interface. It should turn receipt
 inputs into advisory receipt suggestions.
 
-Future inference concerns belong behind `VisionRuntime`, including runtime
-initialization, model sessions, tensor creation, execution, and cleanup. This
-keeps eventual ONNX Runtime integration separate from provider logic.
+Future inference concerns belong behind `VisionRuntime`. The base
+`VisionRuntime` is a contract, not a concrete runtime. It defines lifecycle
+methods for initialization, shutdown, status reporting, model support checks,
+model loading, and execution, but it does not implement those behaviors.
 
-In Phase 1, `VisionRuntime` only reserves this boundary and throws
-`Not Implemented` from runtime methods.
+Concrete runtimes own implementation-specific state such as initialization
+flags, model sessions, loaded model references, tensor creation, execution, and
+cleanup. A future `OnnxVisionRuntime` can implement this contract without
+changing receipt-domain provider APIs.
+
+In Phase 3, `VisionRuntime` only reserves this boundary and throws
+`Not Implemented` from lifecycle methods.
 
 ## Behavior Guarantees
 
