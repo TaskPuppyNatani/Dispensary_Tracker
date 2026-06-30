@@ -1,10 +1,12 @@
 "use strict";
 
+const path = require("path");
 const { VisionRuntime } = require("./VisionRuntime.js");
 
 const ONNX_RUNTIME_STATUS = Object.freeze({
   UNINITIALIZED: "uninitialized",
   READY: "ready",
+  MODEL_LOADED: "model-loaded",
   ERROR: "error",
 });
 
@@ -26,6 +28,11 @@ class OnnxVisionRuntime extends VisionRuntime {
     this.backendAvailable = false;
     this.backendError = "";
     this.executionProviders = normalizeExecutionProviders(options.executionProviders);
+    this.sessions = createEmptySessions();
+    this.modelLoaded = false;
+    this.loadedModelId = "";
+    this.sessionLoadError = "";
+    this.lastSessionLoadMs = 0;
   }
 
   async initialize(options = {}) {
@@ -52,6 +59,7 @@ class OnnxVisionRuntime extends VisionRuntime {
   }
 
   async shutdown() {
+    this._clearSessions();
     this.onnxRuntime = null;
     this.backendAvailable = false;
     this.backendError = "";
@@ -70,7 +78,17 @@ class OnnxVisionRuntime extends VisionRuntime {
       backend: ONNX_BACKEND_NAME,
       backendAvailable: this.backendAvailable,
       executionProviders: Array.from(this.executionProviders),
+      modelLoaded: this.modelLoaded,
+      loadedModelId: this.loadedModelId,
+      sessionsLoaded: {
+        visionEncoder: Boolean(this.sessions.visionEncoder),
+        embedTokens: Boolean(this.sessions.embedTokens),
+        decoder: Boolean(this.sessions.decoder),
+      },
+      sessionCount: countLoadedSessions(this.sessions),
+      lastSessionLoadMs: this.lastSessionLoadMs,
       ...(this.backendError ? { backendError: this.backendError } : {}),
+      ...(this.sessionLoadError ? { sessionLoadError: this.sessionLoadError } : {}),
     };
   }
 
@@ -83,14 +101,55 @@ class OnnxVisionRuntime extends VisionRuntime {
     return false;
   }
 
-  async loadModel(modelMetadata) {
-    void modelMetadata;
-    throwNotImplemented("loadModel");
+  async loadModel(modelInspection) {
+    const startedAt = Date.now();
+
+    try {
+      this._assertReadyToLoad();
+      const sessionPaths = resolveSessionPaths(modelInspection);
+      const sessions = await this._loadSessions(sessionPaths);
+
+      this.sessions = sessions;
+      this.loadedModelId = String(modelInspection.modelId || "");
+      this.modelLoaded = true;
+      this.sessionLoadError = "";
+      this.lastSessionLoadMs = Date.now() - startedAt;
+      this.status = ONNX_RUNTIME_STATUS.MODEL_LOADED;
+      return this.getStatus();
+    } catch (error) {
+      this._clearSessions();
+      this.sessionLoadError = getErrorMessage(error);
+      this.lastSessionLoadMs = Date.now() - startedAt;
+      this.status = ONNX_RUNTIME_STATUS.ERROR;
+      throw error;
+    }
   }
 
   async run(input) {
     void input;
     throwNotImplemented("run");
+  }
+
+  async _loadSessions(sessionPaths) {
+    return {
+      visionEncoder: await this.onnxRuntime.InferenceSession.create(sessionPaths.visionEncoder),
+      embedTokens: await this.onnxRuntime.InferenceSession.create(sessionPaths.embedTokens),
+      decoder: await this.onnxRuntime.InferenceSession.create(sessionPaths.decoder),
+    };
+  }
+
+  _assertReadyToLoad() {
+    if (!this.initialized || !this.onnxRuntime) {
+      throw new Error("OnnxVisionRuntime must be initialized before loading model sessions.");
+    }
+  }
+
+  _clearSessions() {
+    this.sessions = createEmptySessions();
+    this.modelLoaded = false;
+    this.loadedModelId = "";
+    this.sessionLoadError = "";
+    this.lastSessionLoadMs = 0;
   }
 }
 
@@ -122,6 +181,65 @@ function normalizeExecutionProviders(value, fallback = DEFAULT_EXECUTION_PROVIDE
     .filter(Boolean);
 
   return providers.length > 0 ? providers : Array.from(DEFAULT_EXECUTION_PROVIDERS);
+}
+
+function createEmptySessions() {
+  return {
+    visionEncoder: null,
+    embedTokens: null,
+    decoder: null,
+  };
+}
+
+function countLoadedSessions(sessions) {
+  return [
+    sessions && sessions.visionEncoder,
+    sessions && sessions.embedTokens,
+    sessions && sessions.decoder,
+  ].filter(Boolean).length;
+}
+
+function resolveSessionPaths(modelInspection) {
+  if (!modelInspection || typeof modelInspection !== "object") {
+    throw new Error("A model inspection result is required to load ONNX sessions.");
+  }
+
+  if (modelInspection.supported !== true) {
+    throw new Error("Cannot load ONNX sessions for an unsupported model inspection result.");
+  }
+
+  const rawModelPath = String(modelInspection.modelPath || "").trim();
+  if (!rawModelPath) {
+    throw new Error("Model inspection result is missing modelPath.");
+  }
+  const modelPath = path.resolve(rawModelPath);
+
+  const onnxFiles = modelInspection.requiredFiles
+    && modelInspection.requiredFiles.onnx
+    && typeof modelInspection.requiredFiles.onnx === "object"
+    ? modelInspection.requiredFiles.onnx
+    : {};
+
+  return {
+    visionEncoder: resolveModelRelativePath(modelPath, onnxFiles.visionEncoder, "vision encoder"),
+    embedTokens: resolveModelRelativePath(modelPath, onnxFiles.embedTokens, "embed tokens"),
+    decoder: resolveModelRelativePath(modelPath, onnxFiles.decoder, "decoder"),
+  };
+}
+
+function resolveModelRelativePath(modelPath, relativePath, label) {
+  const normalizedRelativePath = String(relativePath || "").trim();
+  if (!normalizedRelativePath) {
+    throw new Error(`Model inspection result is missing ${label} ONNX path.`);
+  }
+
+  const resolvedPath = path.resolve(modelPath, normalizedRelativePath);
+  const relativeToModel = path.relative(modelPath, resolvedPath);
+  if (relativeToModel.startsWith("..") || path.isAbsolute(relativeToModel)) {
+    throw new Error(`Refusing to load ${label} ONNX path outside the model directory.`);
+  }
+
+  return resolvedPath;
 }
 
 function getErrorMessage(error) {
