@@ -22,6 +22,9 @@ loading, ONNX Runtime integration, downloads, or inference execution.
 - `local-ai/VisionRuntime.js`
   - Minimal contract for future inference runtime integrations.
   - Does not import ONNX Runtime or execute models.
+- `local-ai/OnnxVisionRuntime.js`
+  - Inert concrete runtime foundation for a future ONNX implementation.
+  - Tracks only `initialized` and `status`; it does not load models or run inference.
 - `js/services/vision/ReceiptVisionProvider.js`
   - Receipt-domain provider contract for future vision analysis.
 - `js/services/vision/PlaceholderReceiptVisionProvider.js`
@@ -62,6 +65,12 @@ changing receipt-domain provider APIs.
 
 In Phase 3, `VisionRuntime` only reserves this boundary and throws
 `Not Implemented` from lifecycle methods.
+
+Phase 4 adds `OnnxVisionRuntime` as the first concrete runtime implementation.
+It satisfies the `VisionRuntime` contract and maintains only a minimal status
+model: `initialized` and `status`, with status values of `uninitialized` and
+`ready`. It does not import ONNX Runtime, inspect model files, load models,
+create sessions, or perform inference.
 
 ## Behavior Guarantees
 
