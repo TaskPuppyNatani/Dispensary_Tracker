@@ -209,6 +209,36 @@ class OnnxVisionRuntime extends VisionRuntime {
     };
   }
 
+  mergeEmbeddings({ imageFeatures, textEmbeddings, encodedPrompt } = {}) {
+    this._assertReadyForEmbeddingMerge();
+    const validatedMerge = validateEmbeddingMergeInputs({ imageFeatures, textEmbeddings, encodedPrompt });
+    const inputsEmbeds = new Float32Array(validatedMerge.textEmbeddingData);
+
+    for (let index = 0; index < validatedMerge.replaceableImageTokenIndices.length; index += 1) {
+      const tokenIndex = validatedMerge.replaceableImageTokenIndices[index];
+      const textOffset = tokenIndex * validatedMerge.hiddenSize;
+      const imageOffset = index * validatedMerge.hiddenSize;
+
+      for (let hiddenIndex = 0; hiddenIndex < validatedMerge.hiddenSize; hiddenIndex += 1) {
+        inputsEmbeds[textOffset + hiddenIndex] = validatedMerge.imageFeatureData[imageOffset + hiddenIndex];
+      }
+    }
+
+    return {
+      inputsEmbeds,
+      shape: Array.from(validatedMerge.textEmbeddingShape),
+      dtype: "float32",
+      metadata: {
+        hiddenSize: validatedMerge.hiddenSize,
+        textTokenCount: validatedMerge.textTokenCount,
+        replaceableImageTokenCount: validatedMerge.replaceableImageTokenIndices.length,
+        replacedEmbeddingCount: validatedMerge.replaceableImageTokenIndices.length,
+        imageFeatureBlockCount: validatedMerge.imageFeatureBlockCount,
+        diagnostics: calculateTensorDiagnostics(inputsEmbeds),
+      },
+    };
+  }
+
   async _loadSessions(sessionPaths) {
     return {
       visionEncoder: await this.onnxRuntime.InferenceSession.create(sessionPaths.visionEncoder),
@@ -248,6 +278,16 @@ class OnnxVisionRuntime extends VisionRuntime {
 
     if (!this.sessions || !this.sessions.embedTokens) {
       throw new Error("Embed tokens session is not loaded.");
+    }
+  }
+
+  _assertReadyForEmbeddingMerge() {
+    if (!this.initialized || !this.onnxRuntime) {
+      throw new Error("OnnxVisionRuntime must be initialized before merging embeddings.");
+    }
+
+    if (!this.modelLoaded || this.status !== ONNX_RUNTIME_STATUS.MODEL_LOADED) {
+      throw new Error("OnnxVisionRuntime must have a loaded model before merging embeddings.");
     }
   }
 
@@ -370,15 +410,137 @@ function validateEncodedPrompt(encodedPrompt) {
   };
 }
 
+function validateEmbeddingMergeInputs({ imageFeatures, textEmbeddings, encodedPrompt }) {
+  if (!imageFeatures || typeof imageFeatures !== "object") {
+    throw new Error("mergeEmbeddings requires imageFeatures from runVisionEncoder.");
+  }
+
+  if (!textEmbeddings || typeof textEmbeddings !== "object") {
+    throw new Error("mergeEmbeddings requires textEmbeddings from runEmbedTokens.");
+  }
+
+  if (!encodedPrompt || typeof encodedPrompt !== "object") {
+    throw new Error("mergeEmbeddings requires encodedPrompt from SmolVLMTokenizer.encode.");
+  }
+
+  if (!(imageFeatures.imageFeatures instanceof Float32Array)) {
+    throw new Error("imageFeatures.imageFeatures must be a Float32Array.");
+  }
+
+  if (!(textEmbeddings.inputsEmbeds instanceof Float32Array)) {
+    throw new Error("textEmbeddings.inputsEmbeds must be a Float32Array.");
+  }
+
+  const imageFeatureShape = validateShape(imageFeatures.shape, 3, "imageFeatures.shape");
+  const textEmbeddingShape = validateShape(textEmbeddings.shape, 3, "textEmbeddings.shape");
+  const expansion = validateExpansionMetadata(encodedPrompt.expansion);
+  const textTokenCount = textEmbeddingShape[1];
+  const imageFeatureBlockCount = expansion.imageFeatureBlockCount;
+  const imageSeqLen = expansion.imageSeqLen;
+  const imageHiddenSize = imageFeatureShape[2];
+  const textHiddenSize = textEmbeddingShape[2];
+  const expectedReplacementCount = imageFeatureBlockCount * imageSeqLen;
+
+  if (textEmbeddingShape[0] !== 1) {
+    throw new Error("textEmbeddings.shape batch size must be 1.");
+  }
+
+  if (imageFeatureShape[0] !== imageFeatureBlockCount) {
+    throw new Error("imageFeatures.shape does not match tokenizer imageFeatureBlockCount.");
+  }
+
+  if (imageFeatureShape[1] !== imageSeqLen) {
+    throw new Error("imageFeatures.shape does not match tokenizer imageSeqLen.");
+  }
+
+  if (imageHiddenSize !== textHiddenSize) {
+    throw new Error(`Image/text hidden size mismatch: ${imageHiddenSize} !== ${textHiddenSize}.`);
+  }
+
+  if (textHiddenSize !== EXPECTED_SMOLVLM_HIDDEN_SIZE) {
+    throw new Error(`Expected hidden size ${EXPECTED_SMOLVLM_HIDDEN_SIZE}, received ${textHiddenSize}.`);
+  }
+
+  if (expansion.replaceableImageTokenIndices.length !== expectedReplacementCount) {
+    throw new Error("Tokenizer replacement index count does not match image feature count.");
+  }
+
+  if (imageFeatures.imageFeatures.length !== multiplyShape(imageFeatureShape)) {
+    throw new Error("imageFeatures.imageFeatures length does not match imageFeatures.shape.");
+  }
+
+  if (textEmbeddings.inputsEmbeds.length !== multiplyShape(textEmbeddingShape)) {
+    throw new Error("textEmbeddings.inputsEmbeds length does not match textEmbeddings.shape.");
+  }
+
+  if (Number.isSafeInteger(encodedPrompt.tokenCount) && encodedPrompt.tokenCount !== textTokenCount) {
+    throw new Error("encodedPrompt.tokenCount does not match textEmbeddings token count.");
+  }
+
+  for (let index = 0; index < expansion.replaceableImageTokenIndices.length; index += 1) {
+    const tokenIndex = expansion.replaceableImageTokenIndices[index];
+    if (!Number.isSafeInteger(tokenIndex) || tokenIndex < 0 || tokenIndex >= textTokenCount) {
+      throw new Error(`replaceableImageTokenIndices[${index}] is outside the text embedding range.`);
+    }
+  }
+
+  return {
+    imageFeatureData: imageFeatures.imageFeatures,
+    imageFeatureShape,
+    textEmbeddingData: textEmbeddings.inputsEmbeds,
+    textEmbeddingShape,
+    textTokenCount,
+    hiddenSize: textHiddenSize,
+    imageSeqLen,
+    imageFeatureBlockCount,
+    replaceableImageTokenIndices: expansion.replaceableImageTokenIndices,
+  };
+}
+
+function validateExpansionMetadata(expansion) {
+  if (!expansion || typeof expansion !== "object") {
+    throw new Error("encodedPrompt.expansion metadata is required for mergeEmbeddings.");
+  }
+
+  if (expansion.expanded !== true) {
+    throw new Error("encodedPrompt must be expanded before merging embeddings.");
+  }
+
+  const imageSeqLen = readPositiveInteger(expansion.imageSeqLen, "encodedPrompt.expansion.imageSeqLen");
+  const imageFeatureBlockCount = readPositiveInteger(
+    expansion.imageFeatureBlockCount,
+    "encodedPrompt.expansion.imageFeatureBlockCount"
+  );
+  const replaceableImageTokenCount = readPositiveInteger(
+    expansion.replaceableImageTokenCount,
+    "encodedPrompt.expansion.replaceableImageTokenCount"
+  );
+
+  if (!Array.isArray(expansion.replaceableImageTokenIndices)) {
+    throw new Error("encodedPrompt.expansion.replaceableImageTokenIndices must be an array.");
+  }
+
+  if (expansion.replaceableImageTokenIndices.length !== replaceableImageTokenCount) {
+    throw new Error("replaceableImageTokenIndices length does not match replaceableImageTokenCount.");
+  }
+
+  return {
+    imageSeqLen,
+    imageFeatureBlockCount,
+    replaceableImageTokenCount,
+    replaceableImageTokenIndices: Array.from(expansion.replaceableImageTokenIndices),
+  };
+}
+
 function validateShape(shape, expectedRank, label) {
   if (!Array.isArray(shape) || shape.length !== expectedRank) {
-    throw new Error(`processedImage.${label} must be an array with rank ${expectedRank}.`);
+    throw new Error(`${label} must be an array with rank ${expectedRank}.`);
   }
 
   return shape.map((dimension, index) => {
     const normalized = Number(dimension);
     if (!Number.isSafeInteger(normalized) || normalized <= 0) {
-      throw new Error(`processedImage.${label}[${index}] must be a positive integer.`);
+      throw new Error(`${label}[${index}] must be a positive integer.`);
     }
     return normalized;
   });
@@ -562,6 +724,14 @@ function isNumericTypedArray(value) {
     && !(value instanceof DataView)
     && !(value instanceof BigInt64Array)
     && !(value instanceof BigUint64Array);
+}
+
+function readPositiveInteger(value, label) {
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+  return number;
 }
 
 function toPositiveInteger(value, fallback) {
