@@ -54,6 +54,8 @@ class OnnxVisionRuntime extends VisionRuntime {
     this.loadedModelId = "";
     this.sessionLoadError = "";
     this.lastSessionLoadMs = 0;
+    this.imageProcessor = options.imageProcessor || null;
+    this.tokenizer = options.tokenizer || null;
   }
 
   async initialize(options = {}) {
@@ -120,6 +122,21 @@ class OnnxVisionRuntime extends VisionRuntime {
   supportsModel(modelMetadata) {
     void modelMetadata;
     return false;
+  }
+
+  setGenerationComponents({ imageProcessor, tokenizer } = {}) {
+    if (imageProcessor !== undefined) {
+      this.imageProcessor = imageProcessor;
+    }
+
+    if (tokenizer !== undefined) {
+      this.tokenizer = tokenizer;
+    }
+
+    return {
+      imageProcessorAttached: Boolean(this.imageProcessor),
+      tokenizerAttached: Boolean(this.tokenizer),
+    };
   }
 
   async loadModel(modelInspection) {
@@ -415,6 +432,60 @@ class OnnxVisionRuntime extends VisionRuntime {
       promptTokenCount,
       generationTrace,
     });
+  }
+
+  async generate({ image, messages, maxNewTokens = 32, stopTokenIds = [], imageLayouts } = {}) {
+    const components = validateGenerationComponents({
+      runtime: this,
+      imageProcessor: this.imageProcessor,
+      tokenizer: this.tokenizer,
+    });
+    const startedAt = Date.now();
+
+    const preprocessingStartedAt = Date.now();
+    const processedImage = await components.imageProcessor.processImage(image);
+    const preprocessingTimeMs = Date.now() - preprocessingStartedAt;
+
+    const imageFeatures = await this.runVisionEncoder(processedImage);
+    const encodedPrompt = components.tokenizer.encode(messages, { imageLayouts });
+    const textEmbeddings = await this.runEmbedTokens(encodedPrompt);
+    const mergedEmbeddings = this.mergeEmbeddings({
+      imageFeatures,
+      textEmbeddings,
+      encodedPrompt,
+    });
+    const tokenGeneration = await this.generateTokenIds({
+      mergedEmbeddings,
+      encodedPrompt,
+      maxNewTokens,
+      stopTokenIds,
+    });
+    const generatedTokenIds = tokenGeneration.generatedTokenIds;
+    const decoded = components.tokenizer.decodeGeneratedTokens(generatedTokenIds);
+    validateDecodedTokenHandoff(generatedTokenIds, decoded.tokenIds);
+
+    return {
+      text: decoded.text,
+      generatedTokenIds: Array.from(generatedTokenIds),
+      metadata: {
+        promptTokenCount: tokenGeneration.metadata.promptTokenCount,
+        generatedTokenCount: tokenGeneration.generatedTokenCount,
+        executionTimeMs: Date.now() - startedAt,
+        preprocessingTimeMs,
+        visionEncoderTimeMs: imageFeatures.metadata.executionTimeMs,
+        embedTimeMs: textEmbeddings.metadata.executionTimeMs,
+        decoderCalls: tokenGeneration.metadata.decoderCalls,
+        embedCalls: tokenGeneration.metadata.embedCalls,
+        pipeline: {
+          imageProcessed: true,
+          visionEncoded: true,
+          promptEncoded: true,
+          embeddingsMerged: true,
+          tokensGenerated: true,
+          textDecoded: true,
+        },
+      },
+    };
   }
 
   async _loadSessions(sessionPaths) {
@@ -1077,6 +1148,61 @@ function validateGenerationOptions({ maxNewTokens, stopTokenIds }) {
     maxNewTokens,
     stopTokenIdSet: new Set(normalizedStopTokenIds),
   };
+}
+
+function validateGenerationComponents({ runtime, imageProcessor, tokenizer }) {
+  if (!runtime || !runtime.initialized || !runtime.onnxRuntime) {
+    throw new Error("OnnxVisionRuntime must be initialized before generation.");
+  }
+
+  if (!runtime.modelLoaded || runtime.status !== ONNX_RUNTIME_STATUS.MODEL_LOADED) {
+    throw new Error("OnnxVisionRuntime must have a loaded model before generation.");
+  }
+
+  if (!imageProcessor || typeof imageProcessor.processImage !== "function") {
+    throw new Error("A loaded SmolVLMImageProcessor must be attached before generation.");
+  }
+
+  if (!imageProcessor.config) {
+    throw new Error("SmolVLMImageProcessor must be loaded before generation.");
+  }
+
+  if (!tokenizer || typeof tokenizer.encode !== "function" || typeof tokenizer.decodeGeneratedTokens !== "function") {
+    throw new Error("A loaded SmolVLMTokenizer must be attached before generation.");
+  }
+
+  if (!tokenizer.tokenizer) {
+    throw new Error("SmolVLMTokenizer must be loaded before generation.");
+  }
+
+  return {
+    imageProcessor,
+    tokenizer,
+  };
+}
+
+function validateDecodedTokenHandoff(generatedTokenIds, decodedTokenIds) {
+  if (!arraysEqual(generatedTokenIds, decodedTokenIds)) {
+    throw new Error("Decoded token IDs do not match generated token IDs.");
+  }
+}
+
+function arraysEqual(left, right) {
+  if (!Array.isArray(left) && !ArrayBuffer.isView(left)) {
+    return false;
+  }
+
+  if (!Array.isArray(right) && !ArrayBuffer.isView(right)) {
+    return false;
+  }
+
+  const leftValues = Array.from(left);
+  const rightValues = Array.from(right);
+  if (leftValues.length !== rightValues.length) {
+    return false;
+  }
+
+  return leftValues.every((value, index) => value === rightValues[index]);
 }
 
 function readGenerationPromptTokenCount({ mergedEmbeddings, encodedPrompt }) {
