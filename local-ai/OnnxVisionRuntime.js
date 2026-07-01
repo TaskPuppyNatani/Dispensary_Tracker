@@ -17,6 +17,9 @@ const VISION_ENCODER_INPUTS = Object.freeze({
   pixelAttentionMask: "pixel_attention_mask",
 });
 const VISION_ENCODER_OUTPUT_NAME = "image_features";
+const EMBED_TOKENS_INPUT_NAME = "input_ids";
+const EMBED_TOKENS_OUTPUT_NAME = "inputs_embeds";
+const EXPECTED_SMOLVLM_HIDDEN_SIZE = 960;
 
 /**
  * ONNX runtime foundation.
@@ -170,6 +173,42 @@ class OnnxVisionRuntime extends VisionRuntime {
     };
   }
 
+  async runEmbedTokens(encodedPrompt) {
+    this._assertReadyForEmbedTokens();
+    const validatedPrompt = validateEncodedPrompt(encodedPrompt);
+    assertEmbedTokensInputContract(this.sessions.embedTokens);
+
+    const memoryBefore = getRssMemoryUsage();
+    const feeds = this._createEmbedTokensFeeds(validatedPrompt);
+    const startedAt = Date.now();
+    const outputs = await this.sessions.embedTokens.run(feeds);
+    const executionTimeMs = Date.now() - startedAt;
+    const memoryAfter = getRssMemoryUsage();
+    const outputName = selectEmbedTokensOutputName(outputs);
+    const outputTensor = outputs[outputName];
+    const shape = normalizeShape(outputTensor && outputTensor.dims);
+    const dtype = String(outputTensor && outputTensor.type || "");
+    const inputsEmbeds = outputTensor ? outputTensor.data : undefined;
+    const diagnostics = calculateTensorDiagnostics(inputsEmbeds);
+    const hiddenSize = shape.length > 0 ? shape[shape.length - 1] : null;
+
+    return {
+      inputsEmbeds,
+      shape,
+      dtype,
+      metadata: {
+        outputName,
+        tokenCount: validatedPrompt.tokenCount,
+        executionTimeMs,
+        memoryDeltaBytes: memoryAfter - memoryBefore,
+        elementCount: getElementCount(shape, inputsEmbeds),
+        expectedHiddenSize: EXPECTED_SMOLVLM_HIDDEN_SIZE,
+        hiddenSizeMatchesExpected: hiddenSize === EXPECTED_SMOLVLM_HIDDEN_SIZE,
+        diagnostics,
+      },
+    };
+  }
+
   async _loadSessions(sessionPaths) {
     return {
       visionEncoder: await this.onnxRuntime.InferenceSession.create(sessionPaths.visionEncoder),
@@ -198,6 +237,20 @@ class OnnxVisionRuntime extends VisionRuntime {
     }
   }
 
+  _assertReadyForEmbedTokens() {
+    if (!this.initialized || !this.onnxRuntime) {
+      throw new Error("OnnxVisionRuntime must be initialized before running embed tokens.");
+    }
+
+    if (!this.modelLoaded || this.status !== ONNX_RUNTIME_STATUS.MODEL_LOADED) {
+      throw new Error("OnnxVisionRuntime must have a loaded model before running embed tokens.");
+    }
+
+    if (!this.sessions || !this.sessions.embedTokens) {
+      throw new Error("Embed tokens session is not loaded.");
+    }
+  }
+
   _createVisionEncoderFeeds(processedImage) {
     return {
       [VISION_ENCODER_INPUTS.pixelValues]: new this.onnxRuntime.Tensor(
@@ -209,6 +262,16 @@ class OnnxVisionRuntime extends VisionRuntime {
         "bool",
         processedImage.pixelAttentionMask,
         processedImage.pixelAttentionMaskShape
+      ),
+    };
+  }
+
+  _createEmbedTokensFeeds(encodedPrompt) {
+    return {
+      [EMBED_TOKENS_INPUT_NAME]: new this.onnxRuntime.Tensor(
+        "int64",
+        BigInt64Array.from(encodedPrompt.inputIds.map((inputId) => BigInt(inputId))),
+        [1, encodedPrompt.tokenCount]
       ),
     };
   }
@@ -280,6 +343,33 @@ function validateProcessedImage(processedImage) {
   };
 }
 
+function validateEncodedPrompt(encodedPrompt) {
+  if (!encodedPrompt || typeof encodedPrompt !== "object") {
+    throw new Error("runEmbedTokens requires an encoded prompt object.");
+  }
+
+  if (!Array.isArray(encodedPrompt.inputIds) && !isNumericTypedArray(encodedPrompt.inputIds)) {
+    throw new Error("encodedPrompt.inputIds must be an array or numeric typed array.");
+  }
+
+  const inputIds = Array.from(encodedPrompt.inputIds);
+  if (inputIds.length === 0) {
+    throw new Error("encodedPrompt.inputIds must not be empty.");
+  }
+
+  for (let index = 0; index < inputIds.length; index += 1) {
+    const inputId = inputIds[index];
+    if (!Number.isSafeInteger(inputId) || inputId < 0) {
+      throw new Error(`encodedPrompt.inputIds[${index}] must be a non-negative safe integer.`);
+    }
+  }
+
+  return {
+    inputIds,
+    tokenCount: inputIds.length,
+  };
+}
+
 function validateShape(shape, expectedRank, label) {
   if (!Array.isArray(shape) || shape.length !== expectedRank) {
     throw new Error(`processedImage.${label} must be an array with rank ${expectedRank}.`);
@@ -322,6 +412,16 @@ function assertVisionEncoderInputContract(visionEncoderSession) {
   }
 }
 
+function assertEmbedTokensInputContract(embedTokensSession) {
+  if (!Array.isArray(embedTokensSession.inputNames)) {
+    return;
+  }
+
+  if (!embedTokensSession.inputNames.includes(EMBED_TOKENS_INPUT_NAME)) {
+    throw new Error(`Embed tokens input contract mismatch. Missing expected input: ${EMBED_TOKENS_INPUT_NAME}.`);
+  }
+}
+
 function selectVisionEncoderOutputName(outputs) {
   if (!outputs || typeof outputs !== "object") {
     throw new Error("Vision encoder returned no outputs.");
@@ -334,6 +434,23 @@ function selectVisionEncoderOutputName(outputs) {
   const outputNames = Object.keys(outputs);
   if (outputNames.length === 0) {
     throw new Error("Vision encoder returned an empty output map.");
+  }
+
+  return outputNames[0];
+}
+
+function selectEmbedTokensOutputName(outputs) {
+  if (!outputs || typeof outputs !== "object") {
+    throw new Error("Embed tokens returned no outputs.");
+  }
+
+  if (outputs[EMBED_TOKENS_OUTPUT_NAME]) {
+    return EMBED_TOKENS_OUTPUT_NAME;
+  }
+
+  const outputNames = Object.keys(outputs);
+  if (outputNames.length === 0) {
+    throw new Error("Embed tokens returned an empty output map.");
   }
 
   return outputNames[0];
@@ -438,6 +555,13 @@ function countLoadedSessions(sessions) {
     sessions && sessions.embedTokens,
     sessions && sessions.decoder,
   ].filter(Boolean).length;
+}
+
+function isNumericTypedArray(value) {
+  return ArrayBuffer.isView(value)
+    && !(value instanceof DataView)
+    && !(value instanceof BigInt64Array)
+    && !(value instanceof BigUint64Array);
 }
 
 function toPositiveInteger(value, fallback) {
