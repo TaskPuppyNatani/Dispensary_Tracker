@@ -322,6 +322,101 @@ class OnnxVisionRuntime extends VisionRuntime {
     };
   }
 
+  async generateTokenIds({ mergedEmbeddings, encodedPrompt, maxNewTokens = 32, stopTokenIds = [] } = {}) {
+    const options = validateGenerationOptions({ maxNewTokens, stopTokenIds });
+    this._assertReadyForDecoder();
+    if (options.maxNewTokens > 1) {
+      this._assertReadyForEmbedTokens();
+      assertEmbedTokensInputContract(this.sessions.embedTokens);
+    }
+
+    const startedAt = Date.now();
+    const generatedTokenIds = [];
+    const generationTrace = [];
+    const decoderTimes = [];
+    let decoderCalls = 0;
+    let embedCalls = 0;
+    let stoppedBy = "maxNewTokens";
+    let promptTokenCount = readGenerationPromptTokenCount({ mergedEmbeddings, encodedPrompt });
+    let finalPresentCache = [];
+
+    if (options.maxNewTokens === 0) {
+      return createGenerationResult({
+        generatedTokenIds,
+        finalPresentCache,
+        decoderCalls,
+        embedCalls,
+        totalExecutionTimeMs: Date.now() - startedAt,
+        decoderTimes,
+        stoppedBy,
+        promptTokenCount,
+        generationTrace,
+      });
+    }
+
+    const firstTokenResult = await this.generateFirstToken({ mergedEmbeddings, encodedPrompt });
+    decoderCalls += 1;
+    promptTokenCount = firstTokenResult.metadata.promptTokenCount;
+    finalPresentCache = firstTokenResult.presentCache;
+    decoderTimes.push(firstTokenResult.metadata.decoderExecutionTimeMs);
+    validateGenerationCache(finalPresentCache, promptTokenCount, "initial decoder");
+    appendGeneratedToken({
+      tokenId: firstTokenResult.tokenId,
+      generatedTokenIds,
+      generationTrace,
+      promptTokenCount,
+      decoderTimeMs: firstTokenResult.metadata.decoderExecutionTimeMs,
+    });
+
+    if (options.stopTokenIdSet.has(firstTokenResult.tokenId)) {
+      stoppedBy = "stopToken";
+    }
+
+    while (stoppedBy !== "stopToken" && generatedTokenIds.length < options.maxNewTokens) {
+      this._assertReadyForEmbedTokens();
+      assertEmbedTokensInputContract(this.sessions.embedTokens);
+      const previousTokenId = generatedTokenIds[generatedTokenIds.length - 1];
+      const currentSequenceLength = promptTokenCount + generatedTokenIds.length;
+      const tokenEmbedding = await this._runSingleTokenEmbed(previousTokenId);
+      embedCalls += 1;
+      const decoderResult = await this._runDecoderWithCache({
+        inputsEmbeds: tokenEmbedding.inputsEmbeds,
+        pastCache: finalPresentCache,
+        sequenceLength: currentSequenceLength,
+        positionId: currentSequenceLength - 1,
+      });
+      decoderCalls += 1;
+      decoderTimes.push(decoderResult.metadata.executionTimeMs);
+      finalPresentCache = decoderResult.presentCache;
+      validateGenerationCache(finalPresentCache, currentSequenceLength, "incremental decoder");
+
+      const selection = selectTokenFromDecoderResult(decoderResult);
+      appendGeneratedToken({
+        tokenId: selection.tokenId,
+        generatedTokenIds,
+        generationTrace,
+        promptTokenCount,
+        decoderTimeMs: decoderResult.metadata.executionTimeMs,
+      });
+
+      if (options.stopTokenIdSet.has(selection.tokenId)) {
+        stoppedBy = "stopToken";
+      }
+    }
+
+    return createGenerationResult({
+      generatedTokenIds,
+      finalPresentCache,
+      decoderCalls,
+      embedCalls,
+      totalExecutionTimeMs: Date.now() - startedAt,
+      decoderTimes,
+      stoppedBy,
+      promptTokenCount,
+      generationTrace,
+    });
+  }
+
   async _loadSessions(sessionPaths) {
     return {
       visionEncoder: await this.onnxRuntime.InferenceSession.create(sessionPaths.visionEncoder),
@@ -437,6 +532,87 @@ class OnnxVisionRuntime extends VisionRuntime {
       feeds[`past_key_values.${layerIndex}.value`] = createEmptyKvCacheTensor(this.onnxRuntime);
     }
 
+    return feeds;
+  }
+
+  async _runSingleTokenEmbed(tokenId) {
+    const feeds = this._createSingleTokenEmbedFeeds(tokenId);
+    const outputs = await this.sessions.embedTokens.run(feeds);
+    const outputName = selectEmbedTokensOutputName(outputs);
+    const outputTensor = outputs[outputName];
+    const shape = normalizeShape(outputTensor && outputTensor.dims);
+    validateSingleTokenEmbeddingOutput(outputTensor, shape);
+
+    return {
+      inputsEmbeds: outputTensor.data,
+      shape,
+    };
+  }
+
+  async _runDecoderWithCache({ inputsEmbeds, pastCache, sequenceLength, positionId }) {
+    assertDecoderSessionContract(this.sessions.decoder);
+    const feeds = this._createDecoderWithCacheFeeds({
+      inputsEmbeds,
+      pastCache,
+      sequenceLength,
+      positionId,
+    });
+    const startedAt = Date.now();
+    const outputs = await this.sessions.decoder.run(feeds);
+    const executionTimeMs = Date.now() - startedAt;
+    const logits = outputs[DECODER_OUTPUTS.logits];
+    const logitsShape = normalizeShape(logits && logits.dims);
+    const presentCache = collectPresentCache(outputs, this.sessions.decoder.outputNames);
+    validateIncrementalDecoderOutputs({
+      logits,
+      logitsShape,
+      presentCache,
+      sequenceLength,
+    });
+
+    return {
+      logits: logits ? logits.data : undefined,
+      logitsShape,
+      presentCache,
+      metadata: {
+        executionTimeMs,
+        promptTokenCount: 1,
+      },
+    };
+  }
+
+  _createSingleTokenEmbedFeeds(tokenId) {
+    validateTokenId(tokenId, "generated token ID");
+    return {
+      [EMBED_TOKENS_INPUT_NAME]: new this.onnxRuntime.Tensor(
+        "int64",
+        new BigInt64Array([BigInt(tokenId)]),
+        [1, 1]
+      ),
+    };
+  }
+
+  _createDecoderWithCacheFeeds({ inputsEmbeds, pastCache, sequenceLength, positionId }) {
+    validateSingleTokenEmbeddingData(inputsEmbeds);
+    const feeds = {
+      [DECODER_INPUTS.inputsEmbeds]: new this.onnxRuntime.Tensor(
+        "float32",
+        inputsEmbeds,
+        [1, 1, EXPECTED_SMOLVLM_HIDDEN_SIZE]
+      ),
+      [DECODER_INPUTS.attentionMask]: new this.onnxRuntime.Tensor(
+        "int64",
+        createInt64FilledArray(sequenceLength, 1n),
+        [1, sequenceLength]
+      ),
+      [DECODER_INPUTS.positionIds]: new this.onnxRuntime.Tensor(
+        "int64",
+        new BigInt64Array([BigInt(positionId)]),
+        [1, 1]
+      ),
+    };
+
+    addPastCacheFeeds(feeds, pastCache);
     return feeds;
   }
 
@@ -882,6 +1058,207 @@ function selectGreedyToken(nextTokenLogits) {
     tokenId,
     selectedLogit,
   };
+}
+
+function validateGenerationOptions({ maxNewTokens, stopTokenIds }) {
+  if (!Number.isSafeInteger(maxNewTokens) || maxNewTokens < 0) {
+    throw new Error("maxNewTokens must be a safe integer greater than or equal to 0.");
+  }
+
+  if (!Array.isArray(stopTokenIds) && !ArrayBuffer.isView(stopTokenIds)) {
+    throw new Error("stopTokenIds must be an array or typed array.");
+  }
+
+  const normalizedStopTokenIds = Array.from(stopTokenIds).map((tokenId, index) => (
+    validateTokenId(tokenId, `stopTokenIds[${index}]`)
+  ));
+
+  return {
+    maxNewTokens,
+    stopTokenIdSet: new Set(normalizedStopTokenIds),
+  };
+}
+
+function readGenerationPromptTokenCount({ mergedEmbeddings, encodedPrompt }) {
+  if (encodedPrompt && Number.isSafeInteger(encodedPrompt.tokenCount)) {
+    return encodedPrompt.tokenCount;
+  }
+
+  if (mergedEmbeddings && Array.isArray(mergedEmbeddings.shape) && Number.isSafeInteger(Number(mergedEmbeddings.shape[1]))) {
+    return Number(mergedEmbeddings.shape[1]);
+  }
+
+  throw new Error("generateTokenIds requires a prompt token count from encodedPrompt or mergedEmbeddings.");
+}
+
+function appendGeneratedToken({ tokenId, generatedTokenIds, generationTrace, promptTokenCount, decoderTimeMs }) {
+  validateTokenId(tokenId, "generated token ID");
+  generatedTokenIds.push(tokenId);
+  generationTrace.push({
+    step: generatedTokenIds.length,
+    tokenId,
+    sequenceLength: promptTokenCount + generatedTokenIds.length,
+    decoderTimeMs,
+  });
+}
+
+function createGenerationResult({
+  generatedTokenIds,
+  finalPresentCache,
+  decoderCalls,
+  embedCalls,
+  totalExecutionTimeMs,
+  decoderTimes,
+  stoppedBy,
+  promptTokenCount,
+  generationTrace,
+}) {
+  const generatedTokenCount = generatedTokenIds.length;
+  const finalSequenceLength = promptTokenCount + generatedTokenCount;
+
+  if (finalSequenceLength !== promptTokenCount + generatedTokenCount) {
+    throw new Error("finalSequenceLength does not match promptTokenCount + generatedTokenCount.");
+  }
+
+  if (decoderCalls !== generatedTokenCount) {
+    throw new Error("Decoder call count does not match generated token count.");
+  }
+
+  if (embedCalls !== Math.max(0, generatedTokenCount - 1)) {
+    throw new Error("Embed call count does not match generated token count after the first token.");
+  }
+
+  return {
+    generatedTokenIds: Array.from(generatedTokenIds),
+    generatedTokenCount,
+    finalPresentCache,
+    metadata: {
+      decoderCalls,
+      embedCalls,
+      totalExecutionTimeMs,
+      averageDecoderTimeMs: decoderTimes.length > 0
+        ? decoderTimes.reduce((sum, value) => sum + value, 0) / decoderTimes.length
+        : 0,
+      stoppedBy,
+      promptTokenCount,
+      finalSequenceLength,
+    },
+    generationTrace: generationTrace.map((entry) => ({ ...entry })),
+  };
+}
+
+function validateSingleTokenEmbeddingOutput(outputTensor, shape) {
+  if (!outputTensor) {
+    throw new Error("Embed tokens returned no output tensor for generated token.");
+  }
+
+  if (outputTensor.type !== "float32") {
+    throw new Error(`Expected generated token embedding dtype float32, received ${String(outputTensor.type || "")}.`);
+  }
+
+  if (!shapesEqual(shape, [1, 1, EXPECTED_SMOLVLM_HIDDEN_SIZE])) {
+    throw new Error(`Expected generated token embedding shape [1,1,${EXPECTED_SMOLVLM_HIDDEN_SIZE}], received ${JSON.stringify(shape)}.`);
+  }
+
+  validateSingleTokenEmbeddingData(outputTensor.data);
+}
+
+function validateSingleTokenEmbeddingData(inputsEmbeds) {
+  if (!(inputsEmbeds instanceof Float32Array)) {
+    throw new Error("Generated token inputs_embeds must be a Float32Array.");
+  }
+
+  if (inputsEmbeds.length !== EXPECTED_SMOLVLM_HIDDEN_SIZE) {
+    throw new Error(`Generated token inputs_embeds must contain ${EXPECTED_SMOLVLM_HIDDEN_SIZE} values.`);
+  }
+}
+
+function addPastCacheFeeds(feeds, presentCache) {
+  validatePresentCacheEntries(presentCache, "past cache");
+
+  for (const entry of presentCache) {
+    const match = /^present\.(\d+)\.(key|value)$/.exec(entry.name);
+    if (!match) {
+      throw new Error(`Cannot map present cache tensor ${entry.name} to a decoder past_key_values input.`);
+    }
+    feeds[`past_key_values.${match[1]}.${match[2]}`] = entry.tensor;
+  }
+}
+
+function validateGenerationCache(presentCache, sequenceLength, label) {
+  validatePresentCacheEntries(presentCache, label);
+  const expectedShape = [1, DECODER_KV_HEAD_COUNT, sequenceLength, DECODER_HEAD_DIM];
+
+  for (const entry of presentCache) {
+    const tensor = entry.tensor;
+    const shape = normalizeShape(tensor && tensor.dims);
+    if (tensor.type !== "float32") {
+      throw new Error(`Expected ${label} ${entry.name} dtype float32, received ${String(tensor.type || "")}.`);
+    }
+    if (!shapesEqual(shape, expectedShape)) {
+      throw new Error(`Expected ${label} ${entry.name} shape ${JSON.stringify(expectedShape)}, received ${JSON.stringify(shape)}.`);
+    }
+  }
+}
+
+function validatePresentCacheEntries(presentCache, label) {
+  if (!Array.isArray(presentCache)) {
+    throw new Error(`${label} must be an array of present cache tensors.`);
+  }
+
+  const expectedCount = DECODER_LAYER_COUNT * 2;
+  if (presentCache.length !== expectedCount) {
+    throw new Error(`Expected ${expectedCount} ${label} tensors, received ${presentCache.length}.`);
+  }
+
+  const seenNames = new Set();
+  for (const entry of presentCache) {
+    if (!entry || typeof entry !== "object" || typeof entry.name !== "string" || !entry.tensor) {
+      throw new Error(`${label} contains an invalid cache entry.`);
+    }
+    if (!/^present\.\d+\.(?:key|value)$/.test(entry.name)) {
+      throw new Error(`${label} contains unexpected cache tensor name ${entry.name}.`);
+    }
+    if (seenNames.has(entry.name)) {
+      throw new Error(`${label} contains duplicate cache tensor ${entry.name}.`);
+    }
+    seenNames.add(entry.name);
+  }
+}
+
+function validateIncrementalDecoderOutputs({ logits, logitsShape, presentCache, sequenceLength }) {
+  if (!logits) {
+    throw new Error("Incremental decoder output is missing logits.");
+  }
+
+  const expectedLogitsShape = [1, 1, EXPECTED_SMOLVLM_VOCAB_SIZE];
+  if (!shapesEqual(logitsShape, expectedLogitsShape)) {
+    throw new Error(`Expected incremental logits shape ${JSON.stringify(expectedLogitsShape)}, received ${JSON.stringify(logitsShape)}.`);
+  }
+
+  if (logits.type !== "float32") {
+    throw new Error(`Expected incremental logits dtype float32, received ${String(logits.type || "")}.`);
+  }
+
+  validateGenerationCache(presentCache, sequenceLength, "incremental decoder");
+}
+
+function selectTokenFromDecoderResult(decoderResult) {
+  const logits = decoderResult && decoderResult.logits;
+  const logitsShape = normalizeShape(decoderResult && decoderResult.logitsShape);
+  if (!logits || !shapesEqual(logitsShape, [1, 1, EXPECTED_SMOLVLM_VOCAB_SIZE])) {
+    throw new Error("Incremental decoder logits are required for token selection.");
+  }
+
+  return selectGreedyToken(createLogitsSlice(logits, 0, EXPECTED_SMOLVLM_VOCAB_SIZE));
+}
+
+function validateTokenId(tokenId, label) {
+  const normalized = Number(tokenId);
+  if (!Number.isSafeInteger(normalized) || normalized < 0 || normalized >= EXPECTED_SMOLVLM_VOCAB_SIZE) {
+    throw new Error(`${label} must be an integer within [0, ${EXPECTED_SMOLVLM_VOCAB_SIZE - 1}].`);
+  }
+  return normalized;
 }
 
 function shapesEqual(actual, expected) {
