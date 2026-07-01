@@ -295,6 +295,33 @@ class OnnxVisionRuntime extends VisionRuntime {
     };
   }
 
+  async generateFirstToken({ mergedEmbeddings, encodedPrompt } = {}) {
+    const startedAt = Date.now();
+    const decoderResult = await this.runDecoderOnce({ mergedEmbeddings, encodedPrompt });
+    const decoderExecutionTimeMs = decoderResult.metadata.executionTimeMs;
+    const validatedLogits = validateFirstTokenLogits(decoderResult);
+    const argmaxStartedAt = Date.now();
+    const selection = selectGreedyToken(validatedLogits.nextTokenLogits);
+    const argmaxTimeMs = Date.now() - argmaxStartedAt;
+
+    return {
+      tokenId: selection.tokenId,
+      selectedLogit: selection.selectedLogit,
+      nextTokenLogits: validatedLogits.nextTokenLogits,
+      logits: decoderResult.logits,
+      logitsShape: decoderResult.logitsShape,
+      presentCache: decoderResult.presentCache,
+      metadata: {
+        executionTimeMs: Date.now() - startedAt,
+        decoderExecutionTimeMs,
+        argmaxTimeMs,
+        promptTokenCount: validatedLogits.promptTokenCount,
+        vocabSize: EXPECTED_SMOLVLM_VOCAB_SIZE,
+        diagnostics: decoderResult.metadata.diagnostics,
+      },
+    };
+  }
+
   async _loadSessions(sessionPaths) {
     return {
       visionEncoder: await this.onnxRuntime.InferenceSession.create(sessionPaths.visionEncoder),
@@ -784,6 +811,76 @@ function validateDecoderOnceOutputs({ logits, logitsShape, presentCache, promptT
     zeroLengthKvCacheAccepted: Boolean(logits) && presentCache.length > 0,
     deviations,
     expectedPresentShape,
+  };
+}
+
+function validateFirstTokenLogits(decoderResult) {
+  if (!decoderResult || typeof decoderResult !== "object") {
+    throw new Error("generateFirstToken requires decoder output from runDecoderOnce.");
+  }
+
+  const logits = decoderResult.logits;
+  if (!logits || !Number.isSafeInteger(logits.length) || logits.length === 0) {
+    throw new Error("Decoder logits are required for first-token generation.");
+  }
+
+  const logitsShape = normalizeShape(decoderResult.logitsShape);
+  const promptTokenCount = decoderResult
+    && decoderResult.metadata
+    && Number(decoderResult.metadata.promptTokenCount);
+  const expectedShape = [1, promptTokenCount, EXPECTED_SMOLVLM_VOCAB_SIZE];
+
+  if (!Number.isSafeInteger(promptTokenCount) || promptTokenCount <= 0) {
+    throw new Error("Decoder prompt token count is required for first-token generation.");
+  }
+
+  if (!shapesEqual(logitsShape, expectedShape)) {
+    throw new Error(`Expected logits shape ${JSON.stringify(expectedShape)}, received ${JSON.stringify(logitsShape)}.`);
+  }
+
+  if (logits.length !== multiplyShape(logitsShape)) {
+    throw new Error("Decoder logits length does not match logitsShape.");
+  }
+
+  const nextTokenStart = (promptTokenCount - 1) * EXPECTED_SMOLVLM_VOCAB_SIZE;
+  const nextTokenEnd = nextTokenStart + EXPECTED_SMOLVLM_VOCAB_SIZE;
+  return {
+    promptTokenCount,
+    nextTokenLogits: createLogitsSlice(logits, nextTokenStart, nextTokenEnd),
+  };
+}
+
+function createLogitsSlice(logits, start, end) {
+  if (typeof logits.subarray === "function") {
+    return logits.subarray(start, end);
+  }
+
+  return Float32Array.from(Array.prototype.slice.call(logits, start, end));
+}
+
+function selectGreedyToken(nextTokenLogits) {
+  if (!(nextTokenLogits instanceof Float32Array) || nextTokenLogits.length !== EXPECTED_SMOLVLM_VOCAB_SIZE) {
+    throw new Error(`nextTokenLogits must be a Float32Array with ${EXPECTED_SMOLVLM_VOCAB_SIZE} entries.`);
+  }
+
+  let tokenId = 0;
+  let selectedLogit = Number(nextTokenLogits[0]);
+
+  for (let index = 1; index < nextTokenLogits.length; index += 1) {
+    const value = Number(nextTokenLogits[index]);
+    if (value > selectedLogit) {
+      selectedLogit = value;
+      tokenId = index;
+    }
+  }
+
+  if (!Number.isSafeInteger(tokenId) || tokenId < 0 || tokenId >= EXPECTED_SMOLVLM_VOCAB_SIZE) {
+    throw new Error(`Selected token ID ${tokenId} is outside the SmolVLM vocabulary range.`);
+  }
+
+  return {
+    tokenId,
+    selectedLogit,
   };
 }
 
