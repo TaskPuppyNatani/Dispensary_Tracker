@@ -24,6 +24,10 @@ class SmolVLMTokenizer {
     this.processorConfig = null;
     this.imageSeqLen = null;
     this.specialTokens = null;
+    this.vocabularySize = 0;
+    this.validTokenIdSet = new Set();
+    this.specialTokenIdSet = new Set();
+    this.reverseTokenLookup = new Map();
     this.warnings = [];
   }
 
@@ -36,10 +40,12 @@ class SmolVLMTokenizer {
     const tokenizerConfig = await readJsonFile(path.join(resolvedModelPath, "tokenizer_config.json"));
     const specialTokensMap = await readJsonFile(path.join(resolvedModelPath, "special_tokens_map.json"));
     const addedTokens = await readJsonFile(path.join(resolvedModelPath, "added_tokens.json"));
+    const tokenizerJson = await readJsonFile(path.join(resolvedModelPath, "tokenizer.json"));
     const chatTemplateConfig = await readJsonFile(path.join(resolvedModelPath, "chat_template.json"));
     const processorConfig = await readJsonFile(path.join(resolvedModelPath, "processor_config.json"));
     const chatTemplate = readString(chatTemplateConfig.chat_template);
     const imageSeqLen = readPositiveInteger(processorConfig.image_seq_len, 0);
+    const vocabularyMetadata = buildVocabularyMetadata(tokenizerJson, addedTokens);
 
     if (!chatTemplate) {
       throw new Error("chat_template.json is missing chat_template.");
@@ -79,6 +85,10 @@ class SmolVLMTokenizer {
     this.processorConfig = processorConfig;
     this.imageSeqLen = imageSeqLen;
     this.specialTokens = buildSpecialTokens(tokenizer, specialTokensMap, addedTokens);
+    this.vocabularySize = vocabularyMetadata.vocabularySize;
+    this.validTokenIdSet = vocabularyMetadata.validTokenIdSet;
+    this.specialTokenIdSet = buildSpecialTokenIdSet(this.specialTokens);
+    this.reverseTokenLookup = vocabularyMetadata.reverseTokenLookup;
     this.warnings = warnings;
 
     return {
@@ -87,6 +97,7 @@ class SmolVLMTokenizer {
       chatTemplateLoaded: Boolean(this.chatTemplate),
       tokenizerLoaded: Boolean(this.tokenizer),
       imageSeqLen: this.imageSeqLen,
+      vocabularySize: this.vocabularySize,
       specialTokens: this.getSpecialTokens(),
       warnings: Array.from(this.warnings),
     };
@@ -147,6 +158,28 @@ class SmolVLMTokenizer {
     return this.tokenizer.decode(Array.from(tokenIds), {
       skip_special_tokens: options.skipSpecialTokens === true,
     });
+  }
+
+  decodeGeneratedTokens(generatedTokenIds, options = {}) {
+    this._assertLoaded();
+    const tokenIds = validateGeneratedTokenIds(generatedTokenIds, this.validTokenIdSet);
+    const skippedSpecialTokens = options.skipSpecialTokens === true;
+    const cleanUpTokenizationSpaces = options.cleanUpTokenizationSpaces === true;
+
+    const text = this.tokenizer.decode(tokenIds, {
+      skip_special_tokens: skippedSpecialTokens,
+      clean_up_tokenization_spaces: cleanUpTokenizationSpaces,
+    });
+
+    return {
+      text,
+      tokenIds,
+      metadata: {
+        tokenCount: tokenIds.length,
+        skippedSpecialTokens,
+        cleanUpTokenizationSpaces,
+      },
+    };
   }
 
   getSpecialTokens() {
@@ -372,6 +405,29 @@ function validateReplacementIndices(inputIds, indices, imageTokenId, expectedCou
   }
 }
 
+function validateGeneratedTokenIds(generatedTokenIds, validTokenIdSet) {
+  if (!Array.isArray(generatedTokenIds) && !ArrayBuffer.isView(generatedTokenIds)) {
+    throw new Error("decodeGeneratedTokens requires an array or typed array of token IDs.");
+  }
+
+  const tokenIds = Array.from(generatedTokenIds);
+  if (tokenIds.length === 0) {
+    throw new Error("decodeGeneratedTokens requires at least one token ID.");
+  }
+
+  for (const [index, tokenId] of tokenIds.entries()) {
+    if (!Number.isSafeInteger(tokenId)) {
+      throw new Error(`generatedTokenIds[${index}] must be a safe integer.`);
+    }
+
+    if (!validTokenIdSet.has(tokenId)) {
+      throw new Error(`generatedTokenIds[${index}] is outside the loaded tokenizer vocabulary.`);
+    }
+  }
+
+  return tokenIds;
+}
+
 async function loadTransformersForLocalUse() {
   const transformers = await import("@huggingface/transformers");
 
@@ -385,6 +441,72 @@ async function loadTransformersForLocalUse() {
   transformers.env.useFSCache = false;
 
   return transformers;
+}
+
+function buildVocabularyMetadata(tokenizerJson, addedTokens) {
+  const validTokenIdSet = new Set();
+  const reverseTokenLookup = new Map();
+  const vocab = tokenizerJson && tokenizerJson.model && tokenizerJson.model.vocab;
+
+  if (!vocab || typeof vocab !== "object" || Array.isArray(vocab)) {
+    throw new Error("tokenizer.json is missing model.vocab.");
+  }
+
+  for (const [token, id] of Object.entries(vocab)) {
+    addTokenToVocabulary(validTokenIdSet, reverseTokenLookup, token, id);
+  }
+
+  for (const [token, id] of Object.entries(addedTokens || {})) {
+    addTokenToVocabulary(validTokenIdSet, reverseTokenLookup, token, id);
+  }
+
+  if (validTokenIdSet.size === 0) {
+    throw new Error("Tokenizer vocabulary did not contain any token IDs.");
+  }
+
+  return {
+    vocabularySize: Math.max(...validTokenIdSet) + 1,
+    validTokenIdSet,
+    reverseTokenLookup,
+  };
+}
+
+function addTokenToVocabulary(validTokenIdSet, reverseTokenLookup, token, id) {
+  if (!Number.isSafeInteger(id) || id < 0) {
+    return;
+  }
+
+  validTokenIdSet.add(id);
+  if (!reverseTokenLookup.has(id)) {
+    reverseTokenLookup.set(id, token);
+  }
+}
+
+function buildSpecialTokenIdSet(specialTokens) {
+  const ids = new Set();
+  collectSpecialTokenIds(specialTokens, ids);
+  return ids;
+}
+
+function collectSpecialTokenIds(value, ids) {
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  if (Number.isSafeInteger(value.id)) {
+    ids.add(value.id);
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectSpecialTokenIds(item, ids);
+    }
+    return;
+  }
+
+  for (const item of Object.values(value)) {
+    collectSpecialTokenIds(item, ids);
+  }
 }
 
 async function validateTokenizerFiles(modelPath) {
