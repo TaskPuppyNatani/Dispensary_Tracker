@@ -20,6 +20,18 @@ const VISION_ENCODER_OUTPUT_NAME = "image_features";
 const EMBED_TOKENS_INPUT_NAME = "input_ids";
 const EMBED_TOKENS_OUTPUT_NAME = "inputs_embeds";
 const EXPECTED_SMOLVLM_HIDDEN_SIZE = 960;
+const DECODER_INPUTS = Object.freeze({
+  inputsEmbeds: "inputs_embeds",
+  attentionMask: "attention_mask",
+  positionIds: "position_ids",
+});
+const DECODER_OUTPUTS = Object.freeze({
+  logits: "logits",
+});
+const DECODER_LAYER_COUNT = 32;
+const DECODER_KV_HEAD_COUNT = 5;
+const DECODER_HEAD_DIM = 64;
+const EXPECTED_SMOLVLM_VOCAB_SIZE = 49280;
 
 /**
  * ONNX runtime foundation.
@@ -239,6 +251,50 @@ class OnnxVisionRuntime extends VisionRuntime {
     };
   }
 
+  async runDecoderOnce({ mergedEmbeddings, encodedPrompt } = {}) {
+    this._assertReadyForDecoder();
+    assertDecoderSessionContract(this.sessions.decoder);
+    const validatedInput = validateDecoderOnceInput({ mergedEmbeddings, encodedPrompt });
+    const feeds = this._createDecoderOnceFeeds(validatedInput);
+    const memoryBefore = getRssMemoryUsage();
+    const startedAt = Date.now();
+    const outputs = await this.sessions.decoder.run(feeds);
+    const executionTimeMs = Date.now() - startedAt;
+    const memoryAfter = getRssMemoryUsage();
+    const logits = outputs[DECODER_OUTPUTS.logits];
+    const logitsShape = normalizeShape(logits && logits.dims);
+    const logitsType = String(logits && logits.type || "");
+    const presentCache = collectPresentCache(outputs, this.sessions.decoder.outputNames);
+    const postExecutionValidation = validateDecoderOnceOutputs({
+      logits,
+      logitsShape,
+      presentCache,
+      promptTokenCount: validatedInput.promptTokenCount,
+    });
+    const logitsDiagnostics = calculateTensorDiagnostics(logits ? logits.data : null);
+
+    return {
+      logits: logits ? logits.data : undefined,
+      logitsShape,
+      logitsType,
+      presentCache,
+      metadata: {
+        executionTimeMs,
+        memoryDeltaBytes: memoryAfter - memoryBefore,
+        vocabSize: EXPECTED_SMOLVLM_VOCAB_SIZE,
+        hiddenSize: EXPECTED_SMOLVLM_HIDDEN_SIZE,
+        promptTokenCount: validatedInput.promptTokenCount,
+        presentTensorCount: presentCache.length,
+        diagnostics: {
+          logitsMin: logitsDiagnostics.min,
+          logitsMax: logitsDiagnostics.max,
+          logitsMean: logitsDiagnostics.mean,
+        },
+        postExecutionValidation,
+      },
+    };
+  }
+
   async _loadSessions(sessionPaths) {
     return {
       visionEncoder: await this.onnxRuntime.InferenceSession.create(sessionPaths.visionEncoder),
@@ -291,6 +347,20 @@ class OnnxVisionRuntime extends VisionRuntime {
     }
   }
 
+  _assertReadyForDecoder() {
+    if (!this.initialized || !this.onnxRuntime) {
+      throw new Error("OnnxVisionRuntime must be initialized before running the decoder.");
+    }
+
+    if (!this.modelLoaded || this.status !== ONNX_RUNTIME_STATUS.MODEL_LOADED) {
+      throw new Error("OnnxVisionRuntime must have a loaded model before running the decoder.");
+    }
+
+    if (!this.sessions || !this.sessions.decoder) {
+      throw new Error("Decoder session is not loaded.");
+    }
+  }
+
   _createVisionEncoderFeeds(processedImage) {
     return {
       [VISION_ENCODER_INPUTS.pixelValues]: new this.onnxRuntime.Tensor(
@@ -314,6 +384,33 @@ class OnnxVisionRuntime extends VisionRuntime {
         [1, encodedPrompt.tokenCount]
       ),
     };
+  }
+
+  _createDecoderOnceFeeds(decoderInput) {
+    const feeds = {
+      [DECODER_INPUTS.inputsEmbeds]: new this.onnxRuntime.Tensor(
+        "float32",
+        decoderInput.inputsEmbeds,
+        decoderInput.inputsEmbedsShape
+      ),
+      [DECODER_INPUTS.attentionMask]: new this.onnxRuntime.Tensor(
+        "int64",
+        createInt64FilledArray(decoderInput.promptTokenCount, 1n),
+        [1, decoderInput.promptTokenCount]
+      ),
+      [DECODER_INPUTS.positionIds]: new this.onnxRuntime.Tensor(
+        "int64",
+        createPositionIds(decoderInput.promptTokenCount),
+        [1, decoderInput.promptTokenCount]
+      ),
+    };
+
+    for (let layerIndex = 0; layerIndex < DECODER_LAYER_COUNT; layerIndex += 1) {
+      feeds[`past_key_values.${layerIndex}.key`] = createEmptyKvCacheTensor(this.onnxRuntime);
+      feeds[`past_key_values.${layerIndex}.value`] = createEmptyKvCacheTensor(this.onnxRuntime);
+    }
+
+    return feeds;
   }
 
   _clearSessions() {
@@ -497,6 +594,46 @@ function validateEmbeddingMergeInputs({ imageFeatures, textEmbeddings, encodedPr
   };
 }
 
+function validateDecoderOnceInput({ mergedEmbeddings, encodedPrompt }) {
+  if (!mergedEmbeddings || typeof mergedEmbeddings !== "object") {
+    throw new Error("runDecoderOnce requires mergedEmbeddings from mergeEmbeddings.");
+  }
+
+  if (!encodedPrompt || typeof encodedPrompt !== "object") {
+    throw new Error("runDecoderOnce requires encodedPrompt from SmolVLMTokenizer.encode.");
+  }
+
+  if (!(mergedEmbeddings.inputsEmbeds instanceof Float32Array)) {
+    throw new Error("mergedEmbeddings.inputsEmbeds must be a Float32Array.");
+  }
+
+  const inputsEmbedsShape = validateShape(mergedEmbeddings.shape, 3, "mergedEmbeddings.shape");
+  const promptTokenCount = inputsEmbedsShape[1];
+  const hiddenSize = inputsEmbedsShape[2];
+
+  if (inputsEmbedsShape[0] !== 1) {
+    throw new Error("mergedEmbeddings.shape batch size must be 1.");
+  }
+
+  if (hiddenSize !== EXPECTED_SMOLVLM_HIDDEN_SIZE) {
+    throw new Error(`Expected decoder hidden size ${EXPECTED_SMOLVLM_HIDDEN_SIZE}, received ${hiddenSize}.`);
+  }
+
+  if (mergedEmbeddings.inputsEmbeds.length !== multiplyShape(inputsEmbedsShape)) {
+    throw new Error("mergedEmbeddings.inputsEmbeds length does not match mergedEmbeddings.shape.");
+  }
+
+  if (Number.isSafeInteger(encodedPrompt.tokenCount) && encodedPrompt.tokenCount !== promptTokenCount) {
+    throw new Error("encodedPrompt.tokenCount does not match mergedEmbeddings prompt length.");
+  }
+
+  return {
+    inputsEmbeds: mergedEmbeddings.inputsEmbeds,
+    inputsEmbedsShape,
+    promptTokenCount,
+  };
+}
+
 function validateExpansionMetadata(expansion) {
   if (!expansion || typeof expansion !== "object") {
     throw new Error("encodedPrompt.expansion metadata is required for mergeEmbeddings.");
@@ -530,6 +667,132 @@ function validateExpansionMetadata(expansion) {
     replaceableImageTokenCount,
     replaceableImageTokenIndices: Array.from(expansion.replaceableImageTokenIndices),
   };
+}
+
+function assertDecoderSessionContract(decoderSession) {
+  assertSessionHasNames(decoderSession.inputNames, getExpectedDecoderInputNames(), "Decoder input");
+  assertSessionHasNames(decoderSession.outputNames, getExpectedDecoderOutputNames(), "Decoder output");
+}
+
+function assertSessionHasNames(actualNames, expectedNames, label) {
+  if (!Array.isArray(actualNames)) {
+    throw new Error(`${label} names are not exposed by ONNX Runtime.`);
+  }
+
+  const missingNames = expectedNames.filter((name) => !actualNames.includes(name));
+  if (missingNames.length > 0) {
+    throw new Error(`${label} contract mismatch. Missing: ${missingNames.join(", ")}.`);
+  }
+}
+
+function getExpectedDecoderInputNames() {
+  const names = [
+    DECODER_INPUTS.inputsEmbeds,
+    DECODER_INPUTS.attentionMask,
+    DECODER_INPUTS.positionIds,
+  ];
+
+  for (let layerIndex = 0; layerIndex < DECODER_LAYER_COUNT; layerIndex += 1) {
+    names.push(`past_key_values.${layerIndex}.key`);
+    names.push(`past_key_values.${layerIndex}.value`);
+  }
+
+  return names;
+}
+
+function getExpectedDecoderOutputNames() {
+  const names = [DECODER_OUTPUTS.logits];
+
+  for (let layerIndex = 0; layerIndex < DECODER_LAYER_COUNT; layerIndex += 1) {
+    names.push(`present.${layerIndex}.key`);
+    names.push(`present.${layerIndex}.value`);
+  }
+
+  return names;
+}
+
+function createInt64FilledArray(length, value) {
+  const data = new BigInt64Array(length);
+  data.fill(value);
+  return data;
+}
+
+function createPositionIds(length) {
+  const data = new BigInt64Array(length);
+  for (let index = 0; index < length; index += 1) {
+    data[index] = BigInt(index);
+  }
+  return data;
+}
+
+function createEmptyKvCacheTensor(onnxRuntime) {
+  return new onnxRuntime.Tensor(
+    "float32",
+    new Float32Array(0),
+    [1, DECODER_KV_HEAD_COUNT, 0, DECODER_HEAD_DIM]
+  );
+}
+
+function collectPresentCache(outputs, outputNames) {
+  const names = Array.isArray(outputNames) ? outputNames : Object.keys(outputs || {});
+  return names
+    .filter((name) => /^present\.\d+\.(?:key|value)$/.test(name))
+    .map((name) => ({
+      name,
+      tensor: outputs[name],
+    }));
+}
+
+function validateDecoderOnceOutputs({ logits, logitsShape, presentCache, promptTokenCount }) {
+  const deviations = [];
+
+  if (!logits) {
+    deviations.push("Decoder output is missing logits.");
+  } else {
+    const expectedLogitsShape = [1, promptTokenCount, EXPECTED_SMOLVLM_VOCAB_SIZE];
+    if (!shapesEqual(logitsShape, expectedLogitsShape)) {
+      deviations.push(`Expected logits shape ${JSON.stringify(expectedLogitsShape)}, received ${JSON.stringify(logitsShape)}.`);
+    }
+    if (logits.type !== "float32") {
+      deviations.push(`Expected logits dtype float32, received ${String(logits.type || "")}.`);
+    }
+  }
+
+  const expectedPresentTensorCount = DECODER_LAYER_COUNT * 2;
+  if (presentCache.length !== expectedPresentTensorCount) {
+    deviations.push(`Expected ${expectedPresentTensorCount} present cache tensors, received ${presentCache.length}.`);
+  }
+
+  const expectedPresentShape = [1, DECODER_KV_HEAD_COUNT, promptTokenCount, DECODER_HEAD_DIM];
+  for (const entry of presentCache) {
+    const tensor = entry.tensor;
+    const shape = normalizeShape(tensor && tensor.dims);
+    if (!tensor) {
+      deviations.push(`Missing present cache tensor: ${entry.name}.`);
+      continue;
+    }
+    if (tensor.type !== "float32") {
+      deviations.push(`Expected ${entry.name} dtype float32, received ${String(tensor.type || "")}.`);
+    }
+    if (!shapesEqual(shape, expectedPresentShape)) {
+      deviations.push(`Expected ${entry.name} shape ${JSON.stringify(expectedPresentShape)}, received ${JSON.stringify(shape)}.`);
+    }
+  }
+
+  return {
+    contractMatched: deviations.length === 0,
+    zeroLengthKvCacheAccepted: Boolean(logits) && presentCache.length > 0,
+    deviations,
+    expectedPresentShape,
+  };
+}
+
+function shapesEqual(actual, expected) {
+  if (!Array.isArray(actual) || actual.length !== expected.length) {
+    return false;
+  }
+
+  return actual.every((dimension, index) => dimension === expected[index]);
 }
 
 function validateShape(shape, expectedRank, label) {
