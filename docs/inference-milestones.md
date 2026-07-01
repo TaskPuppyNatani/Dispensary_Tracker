@@ -23,3 +23,12 @@ Performance:
 
 Notes:
 This is the first successful end-to-end execution of the local multimodal inference pipeline through the decoder.
+
+Milestone: Completed the local SmolVLM inference engine.
+
+Implemented end-to-end image → text inference.
+Verified vision encoder, tokenizer, embedding merge, decoder, KV-cache reuse, generation loop, and decode pipeline.
+Added unified generate() API.
+Confirmed existing Receipt Tracker launches normally.
+Confirmed existing receipt processing workflow remains fully functional.
+Verified no regressions with live user data.
