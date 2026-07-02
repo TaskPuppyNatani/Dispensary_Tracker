@@ -368,6 +368,8 @@ class OnnxVisionRuntime extends VisionRuntime {
         stoppedBy,
         promptTokenCount,
         generationTrace,
+        generationOptions: options,
+        tokenizer: this.tokenizer,
       });
     }
 
@@ -431,6 +433,8 @@ class OnnxVisionRuntime extends VisionRuntime {
       stoppedBy,
       promptTokenCount,
       generationTrace,
+      generationOptions: options,
+      tokenizer: this.tokenizer,
     });
   }
 
@@ -476,6 +480,12 @@ class OnnxVisionRuntime extends VisionRuntime {
         embedTimeMs: textEmbeddings.metadata.executionTimeMs,
         decoderCalls: tokenGeneration.metadata.decoderCalls,
         embedCalls: tokenGeneration.metadata.embedCalls,
+        stoppedBy: tokenGeneration.metadata.stoppedBy,
+        lastGeneratedTokenId: tokenGeneration.metadata.lastGeneratedTokenId,
+        lastGeneratedTokenText: tokenGeneration.metadata.lastGeneratedTokenText,
+        eosEncountered: tokenGeneration.metadata.eosEncountered,
+        stopTokenEncountered: tokenGeneration.metadata.stopTokenEncountered,
+        maxNewTokensReached: tokenGeneration.metadata.maxNewTokensReached,
         pipeline: {
           imageProcessed: true,
           visionEncoded: true,
@@ -1238,9 +1248,18 @@ function createGenerationResult({
   stoppedBy,
   promptTokenCount,
   generationTrace,
+  generationOptions,
+  tokenizer,
 }) {
   const generatedTokenCount = generatedTokenIds.length;
   const finalSequenceLength = promptTokenCount + generatedTokenCount;
+  const terminationDiagnostics = createTerminationDiagnostics({
+    generatedTokenIds,
+    generatedTokenCount,
+    stoppedBy,
+    generationOptions,
+    tokenizer,
+  });
 
   if (finalSequenceLength !== promptTokenCount + generatedTokenCount) {
     throw new Error("finalSequenceLength does not match promptTokenCount + generatedTokenCount.");
@@ -1265,12 +1284,132 @@ function createGenerationResult({
       averageDecoderTimeMs: decoderTimes.length > 0
         ? decoderTimes.reduce((sum, value) => sum + value, 0) / decoderTimes.length
         : 0,
-      stoppedBy,
+      stoppedBy: terminationDiagnostics.stoppedBy,
+      generatedTokenCount,
+      lastGeneratedTokenId: terminationDiagnostics.lastGeneratedTokenId,
+      lastGeneratedTokenText: terminationDiagnostics.lastGeneratedTokenText,
+      eosEncountered: terminationDiagnostics.eosEncountered,
+      stopTokenEncountered: terminationDiagnostics.stopTokenEncountered,
+      maxNewTokensReached: terminationDiagnostics.maxNewTokensReached,
       promptTokenCount,
       finalSequenceLength,
     },
     generationTrace: generationTrace.map((entry) => ({ ...entry })),
   };
+}
+
+function createTerminationDiagnostics({ generatedTokenIds, generatedTokenCount, stoppedBy, generationOptions, tokenizer }) {
+  const lastGeneratedTokenId = generatedTokenCount > 0
+    ? generatedTokenIds[generatedTokenCount - 1]
+    : null;
+  const eosTokenId = readTokenizerEosTokenId(tokenizer);
+  const stopTokenSet = generationOptions && generationOptions.stopTokenIdSet instanceof Set
+    ? generationOptions.stopTokenIdSet
+    : new Set();
+  const maxNewTokens = generationOptions && Number.isSafeInteger(generationOptions.maxNewTokens)
+    ? generationOptions.maxNewTokens
+    : null;
+  const classifiedStoppedBy = classifyGenerationStopReason({
+    controlStoppedBy: stoppedBy,
+    generatedTokenCount,
+    lastGeneratedTokenId,
+    eosTokenId,
+    stopTokenSet,
+    maxNewTokens,
+  });
+  const diagnostics = {
+    stoppedBy: classifiedStoppedBy,
+    lastGeneratedTokenId,
+    lastGeneratedTokenText: decodeLastGeneratedToken(lastGeneratedTokenId, tokenizer),
+    eosEncountered: classifiedStoppedBy === "eos",
+    stopTokenEncountered: classifiedStoppedBy === "stopToken",
+    maxNewTokensReached: classifiedStoppedBy === "maxNewTokens",
+  };
+
+  validateTerminationDiagnostics(diagnostics);
+  return diagnostics;
+}
+
+function classifyGenerationStopReason({
+  controlStoppedBy,
+  generatedTokenCount,
+  lastGeneratedTokenId,
+  eosTokenId,
+  stopTokenSet,
+  maxNewTokens,
+}) {
+  if (generatedTokenCount === 0) {
+    return maxNewTokens === 0 ? "maxNewTokens" : "unknown";
+  }
+
+  if (Number.isSafeInteger(eosTokenId) && lastGeneratedTokenId === eosTokenId) {
+    return "eos";
+  }
+
+  if (stopTokenSet.has(lastGeneratedTokenId)) {
+    return "stopToken";
+  }
+
+  if (Number.isSafeInteger(maxNewTokens) && generatedTokenCount >= maxNewTokens) {
+    return "maxNewTokens";
+  }
+
+  if (controlStoppedBy === "emptyLogits") {
+    return "emptyLogits";
+  }
+
+  return "unknown";
+}
+
+function readTokenizerEosTokenId(tokenizer) {
+  if (!tokenizer || typeof tokenizer.getSpecialTokens !== "function") {
+    return null;
+  }
+
+  const specialTokens = tokenizer.getSpecialTokens();
+  const eosTokenId = specialTokens
+    && specialTokens.eos
+    && specialTokens.eos.id;
+
+  return Number.isSafeInteger(eosTokenId) ? eosTokenId : null;
+}
+
+function decodeLastGeneratedToken(tokenId, tokenizer) {
+  if (!Number.isSafeInteger(tokenId) || !tokenizer || typeof tokenizer.decodeGeneratedTokens !== "function") {
+    return null;
+  }
+
+  try {
+    const decoded = tokenizer.decodeGeneratedTokens([tokenId]);
+    return decoded && typeof decoded.text === "string" ? decoded.text : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function validateTerminationDiagnostics(diagnostics) {
+  const normalFlags = [
+    diagnostics.eosEncountered,
+    diagnostics.stopTokenEncountered,
+    diagnostics.maxNewTokensReached,
+  ];
+  const trueFlagCount = normalFlags.filter(Boolean).length;
+
+  if (diagnostics.stoppedBy === "eos" && diagnostics.eosEncountered !== true) {
+    throw new Error("Generation diagnostics are inconsistent: eos stop without eosEncountered.");
+  }
+
+  if (diagnostics.stoppedBy === "stopToken" && diagnostics.stopTokenEncountered !== true) {
+    throw new Error("Generation diagnostics are inconsistent: stopToken stop without stopTokenEncountered.");
+  }
+
+  if (diagnostics.stoppedBy === "maxNewTokens" && diagnostics.maxNewTokensReached !== true) {
+    throw new Error("Generation diagnostics are inconsistent: maxNewTokens stop without maxNewTokensReached.");
+  }
+
+  if (["eos", "stopToken", "maxNewTokens"].includes(diagnostics.stoppedBy) && trueFlagCount !== 1) {
+    throw new Error("Generation diagnostics are inconsistent: normal termination must set exactly one stop flag.");
+  }
 }
 
 function validateSingleTokenEmbeddingOutput(outputTensor, shape) {
