@@ -1,0 +1,201 @@
+"use strict";
+
+const path = require("path");
+const { OnnxVisionRuntime } = require("./OnnxVisionRuntime.js");
+const { SmolVLMModelAdapter } = require("./adapters/SmolVLMModelAdapter.js");
+const { SmolVLMImageProcessor } = require("./adapters/SmolVLMImageProcessor.js");
+const { SmolVLMTokenizer } = require("./adapters/SmolVLMTokenizer.js");
+
+const RECEIPT_EXTRACTION_PROMPT = `Extract every piece of information from this cannabis receipt.
+
+Return only valid JSON.
+
+Include:
+- dispensary
+- receipt_number
+- purchase_date
+- purchase_time
+- subtotal
+- tax
+- total
+- products
+- discounts
+- loyalty
+- payment_method
+- budtender
+- license_number
+
+Do not include explanations.
+Do not wrap the JSON in markdown.`;
+
+class MainProcessReceiptVisionProvider {
+  constructor(options = {}) {
+    this.name = String(options.name || "MainProcessReceiptVisionProvider");
+    this.runtime = options.runtime || new OnnxVisionRuntime();
+    this.modelAdapter = options.modelAdapter || new SmolVLMModelAdapter();
+    this.imageProcessor = options.imageProcessor || new SmolVLMImageProcessor();
+    this.tokenizer = options.tokenizer || new SmolVLMTokenizer();
+    this.initialized = false;
+    this.initializationPromise = null;
+    this.initializationTimeMs = 0;
+    this.modelPath = "";
+    this.modelInspection = null;
+  }
+
+  async initialize({ modelPath } = {}) {
+    if (this.initialized) {
+      return this.getStatus();
+    }
+
+    if (this.initializationPromise) {
+      return await this.initializationPromise;
+    }
+
+    this.initializationPromise = this._initialize({ modelPath });
+
+    try {
+      return await this.initializationPromise;
+    } catch (error) {
+      this.initializationPromise = null;
+      throw error;
+    }
+  }
+
+  async analyzeReceipt(input = {}) {
+    if (!this.initialized) {
+      throw new Error("Receipt vision provider must be initialized before analyzing receipts.");
+    }
+
+    const image = resolveReceiptImageInput(input);
+    const messages = createReceiptExtractionMessages();
+    const generationStartedAt = Date.now();
+    const generation = await this.runtime.generate({
+      image,
+      messages,
+      maxNewTokens: readOptionalNonNegativeInteger(input.maxNewTokens, 32, "maxNewTokens"),
+      stopTokenIds: Array.isArray(input.stopTokenIds) || ArrayBuffer.isView(input.stopTokenIds)
+        ? input.stopTokenIds
+        : [],
+      imageLayouts: input.imageLayouts,
+    });
+    const generationTimeMs = Date.now() - generationStartedAt;
+
+    return {
+      status: "generated",
+      text: generation.text,
+      metadata: {
+        providerName: this.name,
+        modelId: this.modelInspection ? this.modelInspection.modelId : "",
+        initializationTimeMs: this.initializationTimeMs,
+        generationTimeMs,
+        runtimeStatus: this.runtime.getStatus(),
+        generation: generation.metadata,
+      },
+    };
+  }
+
+  getStatus() {
+    return {
+      providerName: this.name,
+      initialized: this.initialized,
+      modelPath: this.modelPath,
+      modelId: this.modelInspection ? this.modelInspection.modelId : "",
+      initializationTimeMs: this.initializationTimeMs,
+      runtimeStatus: this.runtime.getStatus(),
+    };
+  }
+
+  async _initialize({ modelPath } = {}) {
+    const resolvedModelPath = resolveModelPath(modelPath);
+    const startedAt = Date.now();
+    const inspection = await this.modelAdapter.inspectModel(resolvedModelPath);
+
+    if (!inspection.supported) {
+      throw new Error(createUnsupportedModelMessage(inspection));
+    }
+
+    await this.runtime.initialize();
+    await this.runtime.loadModel(inspection);
+    await this.imageProcessor.loadConfig(resolvedModelPath);
+    await this.tokenizer.load(resolvedModelPath);
+    this.runtime.setGenerationComponents({
+      imageProcessor: this.imageProcessor,
+      tokenizer: this.tokenizer,
+    });
+
+    this.modelPath = resolvedModelPath;
+    this.modelInspection = inspection;
+    this.initialized = true;
+    this.initializationTimeMs = Date.now() - startedAt;
+    return this.getStatus();
+  }
+}
+
+function createReceiptExtractionMessages() {
+  return [
+    {
+      role: "user",
+      content: [
+        { type: "image" },
+        {
+          type: "text",
+          text: RECEIPT_EXTRACTION_PROMPT,
+        },
+      ],
+    },
+  ];
+}
+
+function resolveReceiptImageInput(input) {
+  if (input && Object.prototype.hasOwnProperty.call(input, "image")) {
+    return input.image;
+  }
+
+  if (input && Object.prototype.hasOwnProperty.call(input, "imageBuffer")) {
+    return input.imageBuffer;
+  }
+
+  if (input && Object.prototype.hasOwnProperty.call(input, "imagePath")) {
+    return input.imagePath;
+  }
+
+  throw new Error("analyzeReceipt requires image, imageBuffer, or imagePath.");
+}
+
+function resolveModelPath(modelPath) {
+  const rawModelPath = String(modelPath || "").trim();
+  if (!rawModelPath) {
+    throw new Error("Receipt vision provider initialization requires modelPath.");
+  }
+
+  return path.resolve(rawModelPath);
+}
+
+function createUnsupportedModelMessage(inspection) {
+  const missingFiles = Array.isArray(inspection.missingFiles) && inspection.missingFiles.length > 0
+    ? ` Missing files: ${inspection.missingFiles.join(", ")}.`
+    : "";
+  const invalidFiles = Array.isArray(inspection.invalidFiles) && inspection.invalidFiles.length > 0
+    ? ` Invalid files: ${inspection.invalidFiles.join(", ")}.`
+    : "";
+
+  return `SmolVLM model inspection failed.${missingFiles}${invalidFiles}`;
+}
+
+function readOptionalNonNegativeInteger(value, fallback, label) {
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  const normalized = Number(value);
+  if (!Number.isSafeInteger(normalized) || normalized < 0) {
+    throw new Error(`${label} must be a non-negative safe integer.`);
+  }
+
+  return normalized;
+}
+
+module.exports = {
+  MainProcessReceiptVisionProvider,
+  RECEIPT_EXTRACTION_PROMPT,
+};
