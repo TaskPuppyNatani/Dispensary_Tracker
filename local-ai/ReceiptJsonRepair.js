@@ -60,7 +60,7 @@ function repair(extraction) {
   const trimmed = text.replace(/[\s\u00A0]+$/u, '');
   if (trimmed.length !== text.length) {
     text = trimmed;
-    repairsApplied.push('trimmedWhitespace');
+    repairsApplied.push("trimmedTrailingWhitespace");
   }
 
   // 2) Remove trailing commas immediately before } or ] (but only when not inside strings)
