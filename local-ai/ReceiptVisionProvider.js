@@ -6,6 +6,8 @@ const { SmolVLMModelAdapter } = require("./adapters/SmolVLMModelAdapter.js");
 const { SmolVLMImageProcessor } = require("./adapters/SmolVLMImageProcessor.js");
 const { SmolVLMTokenizer } = require("./adapters/SmolVLMTokenizer.js");
 
+const DEFAULT_RECEIPT_MAX_NEW_TOKENS = 384;
+
 const RECEIPT_EXTRACTION_PROMPT = `You are an AI specialized in reading cannabis dispensary receipts.
 
 Analyze the attached receipt carefully.
@@ -104,14 +106,13 @@ class MainProcessReceiptVisionProvider {
 
     const image = resolveReceiptImageInput(input);
     const messages = createReceiptExtractionMessages();
+    const generationSettings = resolveGenerationSettings(input, this.tokenizer);
     const generationStartedAt = Date.now();
     const generation = await this.runtime.generate({
       image,
       messages,
-      maxNewTokens: readOptionalNonNegativeInteger(input.maxNewTokens, 32, "maxNewTokens"),
-      stopTokenIds: Array.isArray(input.stopTokenIds) || ArrayBuffer.isView(input.stopTokenIds)
-        ? input.stopTokenIds
-        : [],
+      maxNewTokens: generationSettings.maxNewTokens,
+      stopTokenIds: generationSettings.stopTokenIds,
       imageLayouts: input.imageLayouts,
     });
     const generationTimeMs = Date.now() - generationStartedAt;
@@ -126,6 +127,7 @@ class MainProcessReceiptVisionProvider {
         generationTimeMs,
         runtimeStatus: this.runtime.getStatus(),
         generation: generation.metadata,
+        generationSettings,
       },
     };
   }
@@ -196,6 +198,49 @@ function resolveReceiptImageInput(input) {
   }
 
   throw new Error("analyzeReceipt requires image, imageBuffer, or imagePath.");
+}
+
+function resolveGenerationSettings(input, tokenizer) {
+  const source = input && typeof input === "object" ? input : {};
+  return {
+    maxNewTokens: readOptionalNonNegativeInteger(
+      source.maxNewTokens,
+      DEFAULT_RECEIPT_MAX_NEW_TOKENS,
+      "maxNewTokens"
+    ),
+    stopTokenIds: Object.prototype.hasOwnProperty.call(source, "stopTokenIds")
+      ? readStopTokenIds(source.stopTokenIds)
+      : getDefaultStopTokenIds(tokenizer),
+  };
+}
+
+function getDefaultStopTokenIds(tokenizer) {
+  if (!tokenizer || typeof tokenizer.getSpecialTokens !== "function") {
+    return [];
+  }
+
+  const specialTokens = tokenizer.getSpecialTokens();
+  const eosTokenId = specialTokens
+    && specialTokens.eos
+    && specialTokens.eos.id;
+
+  return Number.isSafeInteger(eosTokenId) && eosTokenId >= 0
+    ? [eosTokenId]
+    : [];
+}
+
+function readStopTokenIds(value) {
+  if (!Array.isArray(value) && !ArrayBuffer.isView(value)) {
+    throw new Error("stopTokenIds must be an array or typed array.");
+  }
+
+  return Array.from(value).map((tokenId, index) => {
+    const normalized = Number(tokenId);
+    if (!Number.isSafeInteger(normalized) || normalized < 0) {
+      throw new Error(`stopTokenIds[${index}] must be a non-negative safe integer.`);
+    }
+    return normalized;
+  });
 }
 
 function resolveModelPath(modelPath) {
