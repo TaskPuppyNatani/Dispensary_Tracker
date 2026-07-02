@@ -6,27 +6,63 @@ const { SmolVLMModelAdapter } = require("./adapters/SmolVLMModelAdapter.js");
 const { SmolVLMImageProcessor } = require("./adapters/SmolVLMImageProcessor.js");
 const { SmolVLMTokenizer } = require("./adapters/SmolVLMTokenizer.js");
 
-const RECEIPT_EXTRACTION_PROMPT = `Extract every piece of information from this cannabis receipt.
+const RECEIPT_EXTRACTION_PROMPT = `You are an AI specialized in reading cannabis dispensary receipts.
 
-Return only valid JSON.
+Analyze the attached receipt carefully.
 
-Include:
-- dispensary
-- receipt_number
-- purchase_date
-- purchase_time
-- subtotal
-- tax
-- total
-- products
-- discounts
-- loyalty
-- payment_method
-- budtender
-- license_number
+Return ONLY a single valid JSON object.
 
+Use JSON null values, not the string "null".
+Use JSON numbers for monetary values when present.
+Do not return numeric values as strings unless they appear as non-numeric text on the receipt.
+
+Do not include markdown.
 Do not include explanations.
-Do not wrap the JSON in markdown.`;
+Do not include comments.
+Do not wrap the JSON in code fences.
+
+If a value cannot be determined from the receipt, use null.
+Do not guess.
+Do not infer missing information.
+Only extract information visible on the receipt.
+
+Extract:
+
+{
+  "dispensary": string|null,
+  "license_number": string|null,
+  "receipt_number": string|null,
+  "purchase_date": string|null,
+  "purchase_time": string|null,
+  "subtotal": number|null,
+  "tax": number|null,
+  "total": number|null,
+  "payment_method": string|null,
+  "budtender": string|null,
+  "discounts": [
+    {
+      "description": string,
+      "amount": number|null
+    }
+  ],
+  "loyalty": {
+    "earned": number|null,
+    "redeemed": number|null,
+    "balance": number|null
+  },
+  "products": [
+    {
+      "name": string,
+      "brand": string|null,
+      "category": string|null,
+      "quantity": number|null,
+      "unit_price": number|null,
+      "total_price": number|null
+    }
+  ]
+}
+
+Return nothing except the JSON object.`;
 
 class MainProcessReceiptVisionProvider {
   constructor(options = {}) {
