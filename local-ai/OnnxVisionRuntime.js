@@ -449,9 +449,11 @@ class OnnxVisionRuntime extends VisionRuntime {
     const preprocessingStartedAt = Date.now();
     const processedImage = await components.imageProcessor.processImage(image);
     const preprocessingTimeMs = Date.now() - preprocessingStartedAt;
+    const derivedImageLayouts = deriveImageLayoutsFromProcessedImage(processedImage);
+    validateCallerImageLayouts(imageLayouts, derivedImageLayouts);
 
     const imageFeatures = await this.runVisionEncoder(processedImage);
-    const encodedPrompt = components.tokenizer.encode(messages, { imageLayouts });
+    const encodedPrompt = components.tokenizer.encode(messages, { imageLayouts: derivedImageLayouts });
     const textEmbeddings = await this.runEmbedTokens(encodedPrompt);
     const mergedEmbeddings = this.mergeEmbeddings({
       imageFeatures,
@@ -486,6 +488,12 @@ class OnnxVisionRuntime extends VisionRuntime {
         eosEncountered: tokenGeneration.metadata.eosEncountered,
         stopTokenEncountered: tokenGeneration.metadata.stopTokenEncountered,
         maxNewTokensReached: tokenGeneration.metadata.maxNewTokensReached,
+        layoutDiagnostics: createGenerationLayoutDiagnostics({
+          processedImage,
+          derivedImageLayouts,
+          encodedPrompt,
+          imageFeatures,
+        }),
         pipeline: {
           imageProcessed: true,
           visionEncoded: true,
@@ -1157,6 +1165,105 @@ function validateGenerationOptions({ maxNewTokens, stopTokenIds }) {
   return {
     maxNewTokens,
     stopTokenIdSet: new Set(normalizedStopTokenIds),
+  };
+}
+
+function deriveImageLayoutsFromProcessedImage(processedImage) {
+  const metadata = processedImage && processedImage.metadata && typeof processedImage.metadata === "object"
+    ? processedImage.metadata
+    : null;
+  const imageLayout = metadata && metadata.imageLayout && typeof metadata.imageLayout === "object"
+    ? metadata.imageLayout
+    : null;
+
+  if (!imageLayout) {
+    throw new Error("Processed image metadata is missing imageLayout.");
+  }
+
+  return [normalizeImageLayoutForGeneration(imageLayout, "processedImage.metadata.imageLayout")];
+}
+
+function validateCallerImageLayouts(callerImageLayouts, derivedImageLayouts) {
+  if (callerImageLayouts === undefined) {
+    return;
+  }
+
+  if (!Array.isArray(callerImageLayouts)) {
+    throw new Error("Caller-supplied imageLayouts must be an array matching the processed image layout.");
+  }
+
+  const normalizedCallerLayouts = callerImageLayouts.map((layout, index) => (
+    normalizeImageLayoutForGeneration(layout, `imageLayouts[${index}]`)
+  ));
+
+  if (normalizedCallerLayouts.length !== derivedImageLayouts.length) {
+    throw new Error(
+      `Caller-supplied imageLayouts length ${normalizedCallerLayouts.length} does not match processed image layout length ${derivedImageLayouts.length}.`
+    );
+  }
+
+  for (let index = 0; index < derivedImageLayouts.length; index += 1) {
+    const callerLayout = normalizedCallerLayouts[index];
+    const derivedLayout = derivedImageLayouts[index];
+    if (callerLayout.rows !== derivedLayout.rows || callerLayout.cols !== derivedLayout.cols) {
+      throw new Error(
+        `Caller-supplied imageLayouts[${index}] { rows: ${callerLayout.rows}, cols: ${callerLayout.cols} } does not match processed image layout { rows: ${derivedLayout.rows}, cols: ${derivedLayout.cols} }.`
+      );
+    }
+  }
+}
+
+function normalizeImageLayoutForGeneration(layout, label) {
+  if (!layout || typeof layout !== "object" || Array.isArray(layout)) {
+    throw new Error(`${label} must be an image layout object.`);
+  }
+
+  const rows = Number(layout.rows);
+  const cols = Number(layout.cols);
+
+  if (!Number.isSafeInteger(rows) || rows < 0) {
+    throw new Error(`${label}.rows must be a non-negative safe integer.`);
+  }
+
+  if (!Number.isSafeInteger(cols) || cols < 0) {
+    throw new Error(`${label}.cols must be a non-negative safe integer.`);
+  }
+
+  if ((rows === 0 && cols > 0) || (rows > 0 && cols === 0)) {
+    throw new Error(`${label} must set both rows and cols, or neither.`);
+  }
+
+  return { rows, cols };
+}
+
+function createGenerationLayoutDiagnostics({ processedImage, derivedImageLayouts, encodedPrompt, imageFeatures }) {
+  const processedMetadata = processedImage && processedImage.metadata && typeof processedImage.metadata === "object"
+    ? processedImage.metadata
+    : {};
+  const expansion = encodedPrompt && encodedPrompt.expansion && typeof encodedPrompt.expansion === "object"
+    ? encodedPrompt.expansion
+    : {};
+
+  return {
+    processedTileCount: Number.isSafeInteger(processedImage && processedImage.tileCount)
+      ? processedImage.tileCount
+      : null,
+    localTileCount: Number.isSafeInteger(processedMetadata.localTileCount)
+      ? processedMetadata.localTileCount
+      : null,
+    globalBlockCount: Number.isSafeInteger(processedMetadata.globalBlockCount)
+      ? processedMetadata.globalBlockCount
+      : null,
+    processedImageFeatureBlockCount: Number.isSafeInteger(processedMetadata.imageFeatureBlockCount)
+      ? processedMetadata.imageFeatureBlockCount
+      : null,
+    derivedImageLayouts: derivedImageLayouts.map((layout) => ({ ...layout })),
+    tokenizerImageFeatureBlockCount: Number.isSafeInteger(expansion.imageFeatureBlockCount)
+      ? expansion.imageFeatureBlockCount
+      : null,
+    visionEncoderShape: Array.isArray(imageFeatures && imageFeatures.shape)
+      ? Array.from(imageFeatures.shape)
+      : [],
   };
 }
 

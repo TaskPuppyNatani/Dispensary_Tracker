@@ -75,6 +75,16 @@ import {
     applyBackupReminderPreference();
     registerServiceWorker();
     attachInstallHandlers();
+    updateLocalAIReviewControls();
+    refreshLocalAIReviewAvailability().catch((error) => {
+      console.warn("Could not check Local AI review availability:", error);
+      state.localAIReviewAvailable = false;
+      state.localAIReviewStatus = {
+        available: false,
+        reason: error && error.message ? error.message : String(error),
+      };
+      updateLocalAIReviewControls("Local AI unavailable");
+    });
     ensureDispensaryLookupLoaded().catch((error) => {
       console.warn("Could not preload dispensary list:", error);
     });
@@ -529,6 +539,7 @@ import {
           trace: scanTrace,
         });
         renderReceiptReviewModel(state.receiptReviewModel);
+        await refreshLocalAIReviewAvailability();
         console.info("receipt_intelligence.result", {
           traceId: scanTrace.traceId,
           enabled: receiptIntelligenceEnabled,
@@ -557,6 +568,10 @@ import {
 
     if (elements.receiptForm) {
       elements.receiptForm.addEventListener("submit", onSaveReceipt);
+    }
+
+    if (elements.localAIReviewBtn) {
+      elements.localAIReviewBtn.addEventListener("click", onRunLocalAIReview);
     }
 
     if (elements.cancelEditBtn) {
@@ -705,6 +720,8 @@ import {
 
     clearTrainingLookupState(true);
     updateMatchConfidenceIndicator(null);
+    state.lastReceiptDecisionTrace = null;
+    state.lastReceiptIntelligenceResult = null;
     clearReceiptReviewModel();
 
     if (!file.type.startsWith("image/")) {
@@ -788,6 +805,7 @@ import {
   function clearReceiptReviewModel() {
     state.receiptReviewModel = null;
     renderReceiptReviewModel(null);
+    updateLocalAIReviewControls();
   }
 
   function renderReceiptReviewModel(reviewModel = state.receiptReviewModel) {
@@ -831,6 +849,7 @@ import {
     renderReviewSection(elements.receiptReviewLoyalty, "Loyalty", reviewModel.loyalty);
     renderReviewDebug(reviewModel);
     elements.receiptReviewPanel.hidden = false;
+    updateLocalAIReviewControls();
   }
 
   function createReviewFieldRow(label, field) {
@@ -952,6 +971,194 @@ import {
 
   function hasReviewValue(value) {
     return value !== null && value !== undefined && String(value).trim() !== "";
+  }
+
+  function hasLocalAIReviewBridge() {
+    return !!(
+      window.localAI
+      && typeof window.localAI.getReceiptReviewStatus === "function"
+      && typeof window.localAI.analyzeReceipt === "function"
+    );
+  }
+
+  async function refreshLocalAIReviewAvailability() {
+    if (!hasLocalAIReviewBridge()) {
+      state.localAIReviewAvailable = false;
+      state.localAIReviewStatus = {
+        available: false,
+        reason: "Local AI bridge unavailable",
+      };
+      updateLocalAIReviewControls("Local AI unavailable");
+      return state.localAIReviewStatus;
+    }
+
+    try {
+      const status = await window.localAI.getReceiptReviewStatus();
+      state.localAIReviewStatus = status && typeof status === "object"
+        ? status
+        : { available: false, reason: "Local AI status unavailable" };
+      state.localAIReviewAvailable = Boolean(state.localAIReviewStatus.available);
+    } catch (error) {
+      state.localAIReviewAvailable = false;
+      state.localAIReviewStatus = {
+        available: false,
+        reason: error && error.message ? error.message : String(error),
+      };
+    }
+
+    updateLocalAIReviewControls();
+    return state.localAIReviewStatus;
+  }
+
+  function updateLocalAIReviewControls(message = "") {
+    if (!elements.localAIReviewBtn && !elements.localAIReviewStatus) {
+      return;
+    }
+
+    const hasProcessedReceipt = !!(state.lastReceiptDecisionTrace && state.receiptReviewModel);
+    const hasImage = !!state.currentFile;
+    const bridgeAvailable = hasLocalAIReviewBridge();
+    const localAIAvailable = bridgeAvailable && Boolean(state.localAIReviewAvailable);
+    const running = Boolean(state.localAIReviewRunning);
+    const disabled = running || !hasProcessedReceipt || !hasImage || !localAIAvailable;
+
+    if (elements.localAIReviewBtn) {
+      elements.localAIReviewBtn.disabled = disabled;
+    }
+
+    if (!elements.localAIReviewStatus) {
+      return;
+    }
+
+    if (message) {
+      elements.localAIReviewStatus.textContent = message;
+      return;
+    }
+
+    if (running) {
+      elements.localAIReviewStatus.textContent = "Running Local AI review...";
+      return;
+    }
+
+    if (!hasProcessedReceipt) {
+      elements.localAIReviewStatus.textContent = "Scan receipt first";
+      return;
+    }
+
+    if (!hasImage) {
+      elements.localAIReviewStatus.textContent = "Receipt image required";
+      return;
+    }
+
+    if (!bridgeAvailable || !localAIAvailable) {
+      elements.localAIReviewStatus.textContent = "Local AI unavailable";
+      return;
+    }
+
+    elements.localAIReviewStatus.textContent = "Local AI ready";
+  }
+
+  async function onRunLocalAIReview() {
+    if (state.localAIReviewRunning) {
+      return;
+    }
+
+    if (!state.lastReceiptDecisionTrace || !state.currentFile) {
+      updateLocalAIReviewControls();
+      return;
+    }
+
+    state.localAIReviewRunning = true;
+    updateLocalAIReviewControls("Checking Local AI availability...");
+
+    try {
+      const status = await refreshLocalAIReviewAvailability();
+      if (!status || !status.available) {
+        updateLocalAIReviewControls("Local AI unavailable");
+        return;
+      }
+
+      updateLocalAIReviewControls("Running Local AI review...");
+      const imageBuffer = await state.currentFile.arrayBuffer();
+      const localAIProvider = {
+        analyzeReceipt: async (input = {}) => {
+          return await window.localAI.analyzeReceipt({
+            imageBuffer: input.imageBuffer,
+            maxNewTokens: input.maxNewTokens,
+            stopTokenIds: input.stopTokenIds,
+            imageLayouts: input.imageLayouts,
+          });
+        },
+      };
+
+      const intelligenceResult = await receiptIntelligenceService.analyze(state.lastReceiptDecisionTrace, {
+        featureEnabled: true,
+        forceLocalAIReview: true,
+        localAIProvider,
+        imageBuffer,
+      });
+      state.lastReceiptIntelligenceResult = intelligenceResult;
+      state.receiptReviewModel = buildReceiptReviewModel({
+        ...intelligenceResult,
+        trace: state.lastReceiptDecisionTrace,
+      });
+      renderReceiptReviewModel(state.receiptReviewModel);
+
+      const advisory = intelligenceResult && intelligenceResult.advisory;
+      updateLocalAIReviewControls(
+        advisory && advisory.succeeded
+          ? "Local AI review complete"
+          : "Local AI review failed"
+      );
+    } catch (error) {
+      console.warn("Local AI review failed:", error);
+      const previousResult = state.lastReceiptIntelligenceResult && typeof state.lastReceiptIntelligenceResult === "object"
+        ? state.lastReceiptIntelligenceResult
+        : {
+            status: "skipped",
+            reason: "local_ai_error",
+            eligible: false,
+            suggestions: [],
+            metadata: {},
+          };
+      const advisory = {
+        available: Boolean(state.localAIReviewAvailable),
+        attempted: true,
+        succeeded: false,
+        source: "local-ai",
+        receipt: null,
+        text: null,
+        pipeline: null,
+        metadata: null,
+        error: error && error.message ? error.message : String(error),
+      };
+
+      state.lastReceiptIntelligenceResult = {
+        ...previousResult,
+        advisory,
+        metadata: {
+          ...(previousResult.metadata && typeof previousResult.metadata === "object" ? previousResult.metadata : {}),
+          localAIAdvisory: advisory,
+        },
+      };
+      state.receiptReviewModel = buildReceiptReviewModel({
+        ...state.lastReceiptIntelligenceResult,
+        trace: state.lastReceiptDecisionTrace,
+      });
+      renderReceiptReviewModel(state.receiptReviewModel);
+      updateLocalAIReviewControls("Local AI review failed. Try again.");
+    } finally {
+      state.localAIReviewRunning = false;
+      if (elements.localAIReviewStatus && elements.localAIReviewStatus.textContent === "Running Local AI review...") {
+        updateLocalAIReviewControls();
+      } else if (elements.localAIReviewBtn) {
+        elements.localAIReviewBtn.disabled = !(
+          state.lastReceiptDecisionTrace
+          && state.currentFile
+          && state.localAIReviewAvailable
+        );
+      }
+    }
   }
 
   function analyzeLatestReceiptDecisionTrace(trace = state.lastReceiptDecisionTrace) {
@@ -1312,6 +1519,8 @@ import {
     state.currentFile = null;
     state.lastOcrText = "";
     state.lastAutoFilledName = "";
+    state.lastReceiptDecisionTrace = null;
+    state.lastReceiptIntelligenceResult = null;
     clearReceiptReviewModel();
     if (elements.receiptInput) {
       elements.receiptInput.value = "";
@@ -1555,6 +1764,8 @@ import {
 
     state.currentFile = null;
     state.lastOcrText = "";
+    state.lastReceiptDecisionTrace = null;
+    state.lastReceiptIntelligenceResult = null;
     clearReceiptReviewModel();
     if (elements.receiptInput) {
       elements.receiptInput.value = "";

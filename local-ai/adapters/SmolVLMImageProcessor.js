@@ -60,12 +60,25 @@ class SmolVLMImageProcessor {
       .raw()
       .toBuffer();
 
+    const imageLayout = createImageLayout(resizedSize.width, resizedSize.height, config);
+    const localTileCount = imageLayout.rows * imageLayout.cols;
+    const globalBlockCount = 1;
+    const imageFeatureBlockCount = config.doImageSplitting
+      ? localTileCount + globalBlockCount
+      : 1;
+
     const tiles = config.doImageSplitting
       ? createSplitTiles(resizedRaw, resizedSize.width, resizedSize.height, config.imageSize)
       : [createPaddedTile(resizedRaw, resizedSize.width, resizedSize.height, config.imageSize)];
 
     if (config.doImageSplitting) {
       tiles.push(await createGlobalTile(this.sharpFactory, resizedRaw, resizedSize, config));
+    }
+
+    if (tiles.length !== imageFeatureBlockCount) {
+      throw new Error(
+        `Processed image tile count ${tiles.length} does not match derived image feature block count ${imageFeatureBlockCount}.`
+      );
     }
 
     const pixelDataShape = [1, tiles.length, 3, config.imageSize, config.imageSize];
@@ -107,6 +120,10 @@ class SmolVLMImageProcessor {
         doConvertRgb: config.doConvertRgb,
         resample: config.resample,
         sharpKernel: config.sharpKernel,
+        imageLayout,
+        localTileCount,
+        globalBlockCount,
+        imageFeatureBlockCount,
       },
     };
   }
@@ -208,6 +225,20 @@ function calculateResizeSize(width, height, longestEdge) {
   return {
     width: Math.max(1, Math.round(width * (longestEdge / height))),
     height: longestEdge,
+  };
+}
+
+function createImageLayout(width, height, config) {
+  if (!config.doImageSplitting) {
+    return {
+      rows: 0,
+      cols: 0,
+    };
+  }
+
+  return {
+    rows: Math.max(1, Math.ceil(height / config.imageSize)),
+    cols: Math.max(1, Math.ceil(width / config.imageSize)),
   };
 }
 

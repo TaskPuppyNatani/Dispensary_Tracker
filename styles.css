@@ -309,6 +309,19 @@ textarea {
   font-size: 0.98rem;
 }
 
+.receipt-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  min-width: 180px;
+}
+
+.receipt-review-actions .menu-btn {
+  text-align: center;
+}
+
 .receipt-review-fields {
   display: grid;
   gap: 0.45rem;
@@ -682,6 +695,17 @@ th {
   .receipt-review-row {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .receipt-review-head,
+  .receipt-review-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .receipt-review-actions {
+    justify-content: flex-start;
+    min-width: 0;
   }
 
   .receipt-review-status {

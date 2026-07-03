@@ -2,8 +2,13 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const { createLocalAISettings, resolveModelDirectory } = require("./local-ai/config.js");
 const { ModelManager } = require("./local-ai/ModelManager.js");
+const { MainProcessReceiptVisionProvider } = require("./local-ai/ReceiptVisionProvider.js");
+const { SmolVLMModelAdapter } = require("./local-ai/adapters/SmolVLMModelAdapter.js");
 
 let modelManager = null;
+let receiptVisionProvider = null;
+
+const DEFAULT_RECEIPT_MODEL_DIRECTORY_NAME = "SmolVLM2-500M";
 
 function getModelManager() {
   if (!modelManager) {
@@ -13,6 +18,102 @@ function getModelManager() {
   }
 
   return modelManager;
+}
+
+function getReceiptVisionProvider() {
+  if (!receiptVisionProvider) {
+    receiptVisionProvider = new MainProcessReceiptVisionProvider();
+  }
+
+  return receiptVisionProvider;
+}
+
+function resolveConfiguredReceiptModelPath() {
+  const localAISettings = createLocalAISettings();
+  const modelRootPath = resolveModelDirectory(localAISettings, __dirname);
+  const selectedModel = String(localAISettings.selectedModel || "").trim()
+    || DEFAULT_RECEIPT_MODEL_DIRECTORY_NAME;
+
+  return path.isAbsolute(selectedModel)
+    ? path.normalize(selectedModel)
+    : path.resolve(modelRootPath, selectedModel);
+}
+
+async function inspectConfiguredReceiptModel() {
+  const modelPath = resolveConfiguredReceiptModelPath();
+  const adapter = new SmolVLMModelAdapter();
+  return await adapter.inspectModel(modelPath);
+}
+
+async function getReceiptReviewStatus() {
+  if (receiptVisionProvider && receiptVisionProvider.initialized) {
+    const status = receiptVisionProvider.getStatus();
+    return {
+      available: true,
+      initialized: true,
+      modelId: status.modelId || "",
+      reason: null,
+      missingFiles: [],
+      warnings: [],
+    };
+  }
+
+  try {
+    const inspection = await inspectConfiguredReceiptModel();
+    return {
+      available: Boolean(inspection.supported),
+      initialized: false,
+      modelId: inspection.modelId || "",
+      reason: inspection.supported ? null : "configured_model_unavailable",
+      missingFiles: Array.isArray(inspection.missingFiles) ? inspection.missingFiles : [],
+      warnings: Array.isArray(inspection.warnings) ? inspection.warnings : [],
+    };
+  } catch (error) {
+    return {
+      available: false,
+      initialized: false,
+      modelId: "",
+      reason: error && error.message ? error.message : String(error),
+      missingFiles: [],
+      warnings: [],
+    };
+  }
+}
+
+function readImageBufferFromPayload(payload = {}) {
+  const imageBuffer = payload && payload.imageBuffer;
+
+  if (Buffer.isBuffer(imageBuffer)) {
+    return imageBuffer;
+  }
+
+  if (imageBuffer instanceof ArrayBuffer) {
+    return Buffer.from(imageBuffer);
+  }
+
+  if (ArrayBuffer.isView(imageBuffer)) {
+    return Buffer.from(imageBuffer.buffer, imageBuffer.byteOffset, imageBuffer.byteLength);
+  }
+
+  throw new Error("localAI:analyzeReceipt requires imageBuffer as an ArrayBuffer or typed array.");
+}
+
+function readReceiptAnalysisPayload(payload = {}) {
+  const providerInput = {
+    imageBuffer: readImageBufferFromPayload(payload),
+  };
+
+  for (const field of ["maxNewTokens", "stopTokenIds", "imageLayouts"]) {
+    if (
+      payload
+      && Object.prototype.hasOwnProperty.call(payload, field)
+      && payload[field] !== undefined
+    ) {
+      providerInput[field] = payload[field];
+    }
+  }
+
+  return providerInput;
 }
 
 function registerLocalAIHandlers() {
@@ -26,6 +127,25 @@ function registerLocalAIHandlers() {
 
   ipcMain.handle("localAI:getInstallationStatus", async (_event, modelId) => {
     return await getModelManager().getInstallationStatus(String(modelId || ""));
+  });
+
+  ipcMain.handle("localAI:getReceiptReviewStatus", async () => {
+    return await getReceiptReviewStatus();
+  });
+
+  ipcMain.handle("localAI:analyzeReceipt", async (_event, payload = {}) => {
+    const status = await getReceiptReviewStatus();
+    if (!status.available) {
+      throw new Error(status.reason || "Local AI receipt review is unavailable.");
+    }
+
+    const modelPath = resolveConfiguredReceiptModelPath();
+    const provider = getReceiptVisionProvider();
+    if (!provider.initialized) {
+      await provider.initialize({ modelPath });
+    }
+
+    return await provider.analyzeReceipt(readReceiptAnalysisPayload(payload));
   });
 }
 

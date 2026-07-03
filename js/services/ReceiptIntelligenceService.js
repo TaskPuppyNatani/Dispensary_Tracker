@@ -132,6 +132,7 @@ export class ReceiptIntelligenceService {
     }
 
     const eligibility = this.evaluateEligibility(trace, options);
+    const forceLocalAIReview = Boolean(options && options.forceLocalAIReview);
     this.logEvent("receipt_intelligence.gate_evaluated", {
       traceId: String(trace.traceId || ""),
       featureEnabled: eligibility.featureEnabled,
@@ -142,9 +143,15 @@ export class ReceiptIntelligenceService {
     });
 
     if (!eligibility.eligible) {
-      const advisory = createLocalAIAdvisory({
-        available: hasLocalAIProvider(getLocalAIProvider(this, options)),
-      });
+      const advisory = forceLocalAIReview
+        ? await runLocalAIAdvisory({
+            trace,
+            options,
+            service: this,
+          })
+        : createLocalAIAdvisory({
+            available: hasLocalAIProvider(getLocalAIProvider(this, options)),
+          });
 
       this.logEvent("receipt_intelligence.result", {
         traceId: String(trace.traceId || ""),
