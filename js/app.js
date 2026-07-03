@@ -30,6 +30,7 @@ import {
 import { onScanReceipt } from "./ocr.js";
 import { extractPhoneFromText, parseTextForStore } from "./matcher.js";
 import { ReceiptIntelligenceService } from "./services/ReceiptIntelligenceService.js";
+import { buildReceiptReviewModel } from "./services/ReceiptReviewModelBuilder.js";
 import { NullProvider } from "./services/providers/NullProvider.js";
 import { elements, state } from "./state.js";
 import {
@@ -523,6 +524,11 @@ import {
           confidence: scanTrace.ocrConfidence,
         });
         state.lastReceiptIntelligenceResult = intelligenceResult;
+        state.receiptReviewModel = buildReceiptReviewModel({
+          ...intelligenceResult,
+          trace: scanTrace,
+        });
+        renderReceiptReviewModel(state.receiptReviewModel);
         console.info("receipt_intelligence.result", {
           traceId: scanTrace.traceId,
           enabled: receiptIntelligenceEnabled,
@@ -699,6 +705,7 @@ import {
 
     clearTrainingLookupState(true);
     updateMatchConfidenceIndicator(null);
+    clearReceiptReviewModel();
 
     if (!file.type.startsWith("image/")) {
       setStatus("Please select a valid image file.", "error");
@@ -776,6 +783,175 @@ import {
     };
 
     console.info("receipt_intelligence.trace_captured", payload);
+  }
+
+  function clearReceiptReviewModel() {
+    state.receiptReviewModel = null;
+    renderReceiptReviewModel(null);
+  }
+
+  function renderReceiptReviewModel(reviewModel = state.receiptReviewModel) {
+    if (!elements.receiptReviewPanel || !elements.receiptReviewFields) {
+      return;
+    }
+
+    clearElement(elements.receiptReviewFields);
+    renderReviewSection(elements.receiptReviewProducts, "", null);
+    renderReviewSection(elements.receiptReviewDiscounts, "", null);
+    renderReviewSection(elements.receiptReviewLoyalty, "", null);
+    renderReviewDebug(null);
+
+    if (!reviewModel || typeof reviewModel !== "object") {
+      elements.receiptReviewPanel.hidden = true;
+      return;
+    }
+
+    const fields = reviewModel.fields && typeof reviewModel.fields === "object"
+      ? reviewModel.fields
+      : {};
+    const fieldRows = [
+      ["dispensary", "Dispensary"],
+      ["licenseNumber", "License"],
+      ["receiptNumber", "Receipt #"],
+      ["purchaseDate", "Date"],
+      ["purchaseTime", "Time"],
+      ["subtotal", "Subtotal"],
+      ["tax", "Tax"],
+      ["total", "Total"],
+      ["paymentMethod", "Payment"],
+      ["budtender", "Budtender"],
+    ];
+
+    for (const [key, label] of fieldRows) {
+      elements.receiptReviewFields.appendChild(createReviewFieldRow(label, fields[key]));
+    }
+
+    renderReviewSection(elements.receiptReviewProducts, "Products", reviewModel.products);
+    renderReviewSection(elements.receiptReviewDiscounts, "Discounts", reviewModel.discounts);
+    renderReviewSection(elements.receiptReviewLoyalty, "Loyalty", reviewModel.loyalty);
+    renderReviewDebug(reviewModel);
+    elements.receiptReviewPanel.hidden = false;
+  }
+
+  function createReviewFieldRow(label, field) {
+    const normalizedField = field && typeof field === "object" ? field : {};
+    const current = normalizedField.current;
+    const suggestion = normalizedField.suggestion;
+    const status = getReviewFieldStatus(normalizedField);
+    const row = document.createElement("div");
+    row.className = `receipt-review-row is-${status}`;
+
+    const labelEl = document.createElement("div");
+    labelEl.className = "receipt-review-label";
+    labelEl.textContent = label;
+
+    const currentEl = document.createElement("div");
+    currentEl.className = "receipt-review-value";
+    const currentCaption = document.createElement("span");
+    currentCaption.textContent = "Current";
+    const currentText = document.createElement("strong");
+    currentText.textContent = formatReviewValue(current);
+    currentEl.append(currentCaption, currentText);
+
+    const suggestionEl = document.createElement("div");
+    suggestionEl.className = "receipt-review-value";
+    const suggestionCaption = document.createElement("span");
+    suggestionCaption.textContent = "AI";
+    const suggestionText = document.createElement("strong");
+    suggestionText.textContent = formatReviewValue(suggestion);
+    suggestionEl.append(suggestionCaption, suggestionText);
+
+    const statusEl = document.createElement("span");
+    statusEl.className = `receipt-review-status is-${status}`;
+    statusEl.textContent = status;
+
+    row.append(labelEl, currentEl, suggestionEl, statusEl);
+    return row;
+  }
+
+  function getReviewFieldStatus(field) {
+    const currentPresent = hasReviewValue(field.current);
+    const suggestionPresent = hasReviewValue(field.suggestion);
+
+    if (!suggestionPresent) {
+      return "unavailable";
+    }
+
+    if (!currentPresent) {
+      return "suggested";
+    }
+
+    return field.changed ? "different" : "same";
+  }
+
+  function renderReviewSection(container, title, value) {
+    if (!container) {
+      return;
+    }
+
+    clearElement(container);
+
+    const hasContent = Array.isArray(value)
+      ? value.length > 0
+      : value !== null && value !== undefined && value !== "";
+
+    if (!hasContent) {
+      container.hidden = true;
+      return;
+    }
+
+    const heading = document.createElement("h4");
+    heading.textContent = title;
+    const pre = document.createElement("pre");
+    pre.textContent = JSON.stringify(value, null, 2);
+    container.append(heading, pre);
+    container.hidden = false;
+  }
+
+  function renderReviewDebug(reviewModel) {
+    if (!elements.receiptReviewDebug || !elements.receiptReviewDebugText) {
+      return;
+    }
+
+    elements.receiptReviewDebugText.textContent = "";
+    elements.receiptReviewDebug.hidden = true;
+
+    if (!reviewModel || typeof reviewModel !== "object") {
+      return;
+    }
+
+    const advisory = reviewModel.advisory && typeof reviewModel.advisory === "object"
+      ? reviewModel.advisory
+      : null;
+    const debugPayload = {
+      text: advisory ? advisory.text : null,
+      pipeline: advisory ? advisory.pipeline : null,
+      metadata: advisory ? advisory.metadata : null,
+    };
+    const hasDebugContent = Object.values(debugPayload).some((value) => value !== null && value !== undefined);
+
+    if (!hasDebugContent) {
+      return;
+    }
+
+    elements.receiptReviewDebugText.textContent = JSON.stringify(debugPayload, null, 2);
+    elements.receiptReviewDebug.hidden = false;
+  }
+
+  function clearElement(element) {
+    if (!element) {
+      return;
+    }
+
+    element.textContent = "";
+  }
+
+  function formatReviewValue(value) {
+    return hasReviewValue(value) ? String(value) : "-";
+  }
+
+  function hasReviewValue(value) {
+    return value !== null && value !== undefined && String(value).trim() !== "";
   }
 
   function analyzeLatestReceiptDecisionTrace(trace = state.lastReceiptDecisionTrace) {
@@ -1136,6 +1312,7 @@ import {
     state.currentFile = null;
     state.lastOcrText = "";
     state.lastAutoFilledName = "";
+    clearReceiptReviewModel();
     if (elements.receiptInput) {
       elements.receiptInput.value = "";
     }
@@ -1378,6 +1555,7 @@ import {
 
     state.currentFile = null;
     state.lastOcrText = "";
+    clearReceiptReviewModel();
     if (elements.receiptInput) {
       elements.receiptInput.value = "";
     }

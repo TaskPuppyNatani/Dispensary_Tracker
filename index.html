@@ -98,6 +98,23 @@
             <button id="cancelEditBtn" type="button" class="menu-btn" hidden>Cancel Edit</button>
           </div>
         </form>
+
+        <section id="receiptReviewPanel" class="receipt-review" hidden aria-live="polite">
+          <div class="receipt-review-head">
+            <div>
+              <h3>AI Review</h3>
+              <p class="hint">Visual suggestions only. Nothing is applied until a later review flow.</p>
+            </div>
+          </div>
+          <div id="receiptReviewFields" class="receipt-review-fields"></div>
+          <div id="receiptReviewProducts" class="receipt-review-section" hidden></div>
+          <div id="receiptReviewDiscounts" class="receipt-review-section" hidden></div>
+          <div id="receiptReviewLoyalty" class="receipt-review-section" hidden></div>
+          <details id="receiptReviewDebug" class="receipt-review-debug" hidden>
+            <summary>AI diagnostics</summary>
+            <pre id="receiptReviewDebugText"></pre>
+          </details>
+        </section>
       </section>
 
       <section class="card reveal-up" style="--delay: 0.3s;">

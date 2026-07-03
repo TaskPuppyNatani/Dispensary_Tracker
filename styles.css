@@ -290,6 +290,128 @@ textarea {
   gap: 0.7rem;
 }
 
+.receipt-review {
+  margin-top: 1rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.95rem;
+}
+
+.receipt-review-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.receipt-review-head h3 {
+  margin: 0 0 0.15rem;
+  font-size: 0.98rem;
+}
+
+.receipt-review-fields {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.receipt-review-row {
+  display: grid;
+  grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.55rem;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.55rem;
+  background: color-mix(in srgb, var(--surface) 88%, black 8%);
+}
+
+.receipt-review-label {
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.82rem;
+}
+
+.receipt-review-value {
+  min-width: 0;
+}
+
+.receipt-review-value span {
+  display: block;
+  margin: 0 0 0.12rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.receipt-review-value strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.receipt-review-status {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.22rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.receipt-review-status.is-same {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+}
+
+.receipt-review-status.is-suggested {
+  color: var(--accent-2);
+  border-color: color-mix(in srgb, var(--accent-2) 48%, var(--line));
+}
+
+.receipt-review-status.is-different {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--line));
+}
+
+.receipt-review-status.is-unavailable {
+  color: var(--muted);
+}
+
+.receipt-review-section,
+.receipt-review-debug {
+  margin-top: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem;
+  background: color-mix(in srgb, var(--surface) 90%, black 7%);
+}
+
+.receipt-review-section h4 {
+  margin: 0 0 0.45rem;
+  font-size: 0.86rem;
+}
+
+.receipt-review-section pre,
+.receipt-review-debug pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font: 0.78rem/1.45 "JetBrains Mono", monospace;
+}
+
+.receipt-review-debug summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .history-head {
   display: flex;
   align-items: baseline;
@@ -555,6 +677,15 @@ th {
 
   .field-grid {
     grid-template-columns: 1fr;
+  }
+
+  .receipt-review-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .receipt-review-status {
+    width: fit-content;
   }
 
   .row-actions {
