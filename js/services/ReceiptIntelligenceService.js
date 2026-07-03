@@ -11,6 +11,7 @@ const SERVICE_REASONS = new Set([
   "provider_error",
   "invalid_trace",
 ]);
+const LOCAL_AI_SOURCE = "local-ai";
 
 function normalizeServiceStatus(status, fallback = "noop") {
   const normalized = String(status || "").trim();
@@ -37,6 +38,7 @@ export class ReceiptIntelligenceService {
     assertReceiptAIProvider(provider);
 
     this.provider = provider;
+    this.localAIProvider = options.localAIProvider || null;
     this.featureEnabled = Boolean(options.featureEnabled);
     this.lowConfidenceThreshold = Number.isFinite(options.lowConfidenceThreshold)
       ? Number(options.lowConfidenceThreshold)
@@ -106,6 +108,10 @@ export class ReceiptIntelligenceService {
     const startedAt = Date.now();
 
     if (!trace || typeof trace !== "object") {
+      const advisory = createLocalAIAdvisory({
+        available: hasLocalAIProvider(getLocalAIProvider(this, options)),
+      });
+
       this.logEvent("receipt_intelligence.result", {
         status: "error",
         reason: "invalid_trace",
@@ -116,9 +122,11 @@ export class ReceiptIntelligenceService {
         reason: "invalid_trace",
         eligible: false,
         suggestions: [],
+        advisory,
         metadata: {
           providerName: this.provider.name,
           elapsedMs: Date.now() - startedAt,
+          localAIAdvisory: advisory,
         },
       };
     }
@@ -134,6 +142,10 @@ export class ReceiptIntelligenceService {
     });
 
     if (!eligibility.eligible) {
+      const advisory = createLocalAIAdvisory({
+        available: hasLocalAIProvider(getLocalAIProvider(this, options)),
+      });
+
       this.logEvent("receipt_intelligence.result", {
         traceId: String(trace.traceId || ""),
         status: "skipped",
@@ -145,10 +157,12 @@ export class ReceiptIntelligenceService {
         reason: eligibility.reason,
         eligible: false,
         suggestions: [],
+        advisory,
         metadata: {
           providerName: this.provider.name,
           elapsedMs: Date.now() - startedAt,
           gate: eligibility,
+          localAIAdvisory: advisory,
         },
       };
     }
@@ -171,6 +185,11 @@ export class ReceiptIntelligenceService {
       const suggestions = Array.isArray(providerResult && providerResult.suggestions)
         ? providerResult.suggestions
         : [];
+      const advisory = await runLocalAIAdvisory({
+        trace,
+        options,
+        service: this,
+      });
 
       this.logEvent("receipt_intelligence.result", {
         traceId: String(trace.traceId || ""),
@@ -184,11 +203,13 @@ export class ReceiptIntelligenceService {
         reason,
         eligible: true,
         suggestions,
+        advisory,
         metadata: {
           providerName: this.provider.name,
           elapsedMs: Date.now() - startedAt,
           gate: eligibility,
           providerMetadata: providerResult && providerResult.metadata ? providerResult.metadata : {},
+          localAIAdvisory: advisory,
         },
       };
     } catch (error) {
@@ -203,18 +224,182 @@ export class ReceiptIntelligenceService {
         providerName: this.provider.name,
       });
 
+      const advisory = createLocalAIAdvisory({
+        available: hasLocalAIProvider(getLocalAIProvider(this, options)),
+      });
+
       return {
         status: "error",
         reason: "provider_error",
         eligible: true,
         suggestions: [],
+        advisory,
         metadata: {
           providerName: this.provider.name,
           elapsedMs: Date.now() - startedAt,
           gate: eligibility,
           errorMessage: error && error.message ? error.message : String(error),
+          localAIAdvisory: advisory,
         },
       };
     }
   }
+}
+
+function getLocalAIProvider(service, options = {}) {
+  if (options && Object.prototype.hasOwnProperty.call(options, "localAIProvider")) {
+    return options.localAIProvider;
+  }
+
+  return service.localAIProvider;
+}
+
+function hasLocalAIProvider(provider) {
+  return !!provider && typeof provider.analyzeReceipt === "function";
+}
+
+async function runLocalAIAdvisory({ trace, options, service }) {
+  const localAIProvider = getLocalAIProvider(service, options);
+  const available = hasLocalAIProvider(localAIProvider);
+
+  if (!available) {
+    return createLocalAIAdvisory({ available: false });
+  }
+
+  const imageInput = resolveLocalAIImageInput(trace, options);
+  if (!imageInput) {
+    return createLocalAIAdvisory({ available: true });
+  }
+
+  const providerInput = {
+    ...imageInput,
+    ...readLocalAIGenerationOptions(options),
+  };
+
+  try {
+    const providerResult = await localAIProvider.analyzeReceipt(providerInput);
+    return normalizeLocalAIProviderResult(providerResult);
+  } catch (error) {
+    return createLocalAIAdvisory({
+      available: true,
+      attempted: true,
+      error: error && error.message ? error.message : String(error),
+    });
+  }
+}
+
+function normalizeLocalAIProviderResult(providerResult) {
+  if (!isRecord(providerResult)) {
+    return createMalformedLocalAIAdvisory("Local AI provider returned a non-object result.");
+  }
+
+  const receipt = providerResult.receipt === undefined || providerResult.receipt === null
+    ? null
+    : providerResult.receipt;
+  const text = providerResult.text === undefined || providerResult.text === null
+    ? null
+    : providerResult.text;
+  const pipeline = providerResult.pipeline === undefined || providerResult.pipeline === null
+    ? null
+    : providerResult.pipeline;
+  const metadata = providerResult.metadata === undefined || providerResult.metadata === null
+    ? null
+    : providerResult.metadata;
+
+  if (receipt !== null && !isRecord(receipt)) {
+    return createMalformedLocalAIAdvisory("Local AI provider returned malformed receipt data.");
+  }
+
+  if (text !== null && typeof text !== "string") {
+    return createMalformedLocalAIAdvisory("Local AI provider returned malformed text data.");
+  }
+
+  if (pipeline !== null && !isRecord(pipeline)) {
+    return createMalformedLocalAIAdvisory("Local AI provider returned malformed pipeline data.");
+  }
+
+  if (metadata !== null && !isRecord(metadata)) {
+    return createMalformedLocalAIAdvisory("Local AI provider returned malformed metadata.");
+  }
+
+  return createLocalAIAdvisory({
+    available: true,
+    attempted: true,
+    succeeded: true,
+    receipt,
+    text,
+    pipeline,
+    metadata,
+  });
+}
+
+function createMalformedLocalAIAdvisory(error) {
+  return createLocalAIAdvisory({
+    available: true,
+    attempted: true,
+    error,
+  });
+}
+
+function resolveLocalAIImageInput(trace, options = {}) {
+  return readImageInput(options) || readImageInput(trace);
+}
+
+function readImageInput(source) {
+  if (!source || typeof source !== "object") {
+    return null;
+  }
+
+  for (const field of ["image", "imageBuffer", "imagePath"]) {
+    if (Object.prototype.hasOwnProperty.call(source, field) && hasUsableImageValue(source[field])) {
+      return {
+        [field]: source[field],
+      };
+    }
+  }
+
+  return null;
+}
+
+function hasUsableImageValue(value) {
+  return value !== undefined && value !== null && value !== "";
+}
+
+function readLocalAIGenerationOptions(options = {}) {
+  const generationOptions = {};
+
+  for (const field of ["maxNewTokens", "stopTokenIds", "imageLayouts"]) {
+    if (options && Object.prototype.hasOwnProperty.call(options, field)) {
+      generationOptions[field] = options[field];
+    }
+  }
+
+  return generationOptions;
+}
+
+function createLocalAIAdvisory({
+  available = false,
+  attempted = false,
+  succeeded = false,
+  receipt = null,
+  text = null,
+  pipeline = null,
+  metadata = null,
+  error = null,
+} = {}) {
+  return {
+    available: Boolean(available),
+    attempted: Boolean(attempted),
+    succeeded: Boolean(succeeded),
+    source: LOCAL_AI_SOURCE,
+    receipt,
+    text,
+    pipeline,
+    metadata,
+    error,
+  };
+}
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
