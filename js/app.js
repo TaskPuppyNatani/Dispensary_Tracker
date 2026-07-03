@@ -1200,7 +1200,49 @@ import {
       }
     }
 
+    const namedMonthMatch = raw.match(/^([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})$/);
+    if (namedMonthMatch) {
+      const month = readEnglishMonthNumber(namedMonthMatch[1]);
+      const day = Number(namedMonthMatch[2]);
+      const year = Number(namedMonthMatch[3]);
+      if (month && isValidDateParts(year, month, day)) {
+        return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+    }
+
     return "";
+  }
+
+  function readEnglishMonthNumber(value) {
+    const normalized = String(value || "").trim().toLowerCase().replace(/\.$/, "");
+    const monthNames = {
+      january: 1,
+      jan: 1,
+      february: 2,
+      feb: 2,
+      march: 3,
+      mar: 3,
+      april: 4,
+      apr: 4,
+      may: 5,
+      june: 6,
+      jun: 6,
+      july: 7,
+      jul: 7,
+      august: 8,
+      aug: 8,
+      september: 9,
+      sep: 9,
+      sept: 9,
+      october: 10,
+      oct: 10,
+      november: 11,
+      nov: 11,
+      december: 12,
+      dec: 12,
+    };
+
+    return monthNames[normalized] || 0;
   }
 
   function isValidDateParts(year, month, day) {
