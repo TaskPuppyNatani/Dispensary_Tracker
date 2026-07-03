@@ -19,6 +19,8 @@ const EXPECTED_RECEIPT_TOP_LEVEL_KEYS = [
   "products"
 ];
 
+const REQUIRED_RECEIPT_TOP_LEVEL_KEYS = EXPECTED_RECEIPT_TOP_LEVEL_KEYS.filter((key) => key !== "loyalty");
+
 const STRING_OR_NULL_FIELDS = [
   "dispensary",
   "license_number",
@@ -68,7 +70,7 @@ function validate(repairResult) {
       validation: {
         valid: false,
         parseSucceeded: false,
-        missingFields: EXPECTED_RECEIPT_TOP_LEVEL_KEYS.slice(),
+        missingFields: REQUIRED_RECEIPT_TOP_LEVEL_KEYS.slice(),
         unexpectedFields: [],
         typeErrors: []
       }
@@ -85,7 +87,7 @@ function validate(repairResult) {
       validation: {
         valid: false,
         parseSucceeded,
-        missingFields: EXPECTED_RECEIPT_TOP_LEVEL_KEYS.slice(),
+        missingFields: REQUIRED_RECEIPT_TOP_LEVEL_KEYS.slice(),
         unexpectedFields,
         typeErrors: [
           {
@@ -99,7 +101,7 @@ function validate(repairResult) {
   }
 
   const receiptKeys = Object.keys(receipt);
-  for (const key of EXPECTED_RECEIPT_TOP_LEVEL_KEYS) {
+  for (const key of REQUIRED_RECEIPT_TOP_LEVEL_KEYS) {
     if (!Object.prototype.hasOwnProperty.call(receipt, key)) {
       missingFields.push(key);
     }
@@ -247,5 +249,6 @@ function getActualType(value) {
 
 module.exports = {
   EXPECTED_RECEIPT_TOP_LEVEL_KEYS,
+  REQUIRED_RECEIPT_TOP_LEVEL_KEYS,
   validate
 };

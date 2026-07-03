@@ -133,6 +133,17 @@ function run() {
     assert.strictEqual(result.receipt.total, 46.7);
   });
 
+  test("missing optional loyalty maps successfully", function() {
+    const receipt = makeReceipt();
+    delete receipt.loyalty;
+    const result = processReceipt(makeAnalysis(JSON.stringify(receipt)));
+
+    assert.strictEqual(result.pipeline.validation.validation.valid, true);
+    assert.deepStrictEqual(result.pipeline.validation.validation.missingFields, []);
+    assert.strictEqual(result.pipeline.mapping.mapping.mapped, true);
+    assert.strictEqual(result.receipt.loyalty, null);
+  });
+
   test("validation failure", function() {
     const result = processReceipt(makeAnalysis(JSON.stringify(makeReceipt({ subtotal: "42.50" }))));
 

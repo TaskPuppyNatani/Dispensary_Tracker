@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const {
   EXPECTED_RECEIPT_TOP_LEVEL_KEYS,
+  REQUIRED_RECEIPT_TOP_LEVEL_KEYS,
   validate
 } = require("./local-ai/ReceiptJsonValidator");
 
@@ -77,6 +78,47 @@ function run() {
     assert.deepStrictEqual(result.validation.typeErrors, []);
   });
 
+  test("missing optional loyalty validates", function() {
+    const receipt = makeValidReceipt();
+    delete receipt.loyalty;
+
+    const result = validate(repairResultFrom(receipt));
+    assert.strictEqual(result.validation.valid, true);
+    assert.deepStrictEqual(result.validation.missingFields, []);
+    assert.deepStrictEqual(result.validation.typeErrors, []);
+  });
+
+  test("present valid loyalty validates", function() {
+    const result = validate(repairResultFrom(makeValidReceipt({
+      loyalty: {
+        earned: 5,
+        redeemed: null,
+        balance: 25
+      }
+    })));
+
+    assert.strictEqual(result.validation.valid, true);
+    assert.deepStrictEqual(result.validation.typeErrors, []);
+  });
+
+  test("present invalid loyalty fails", function() {
+    const result = validate(repairResultFrom(makeValidReceipt({
+      loyalty: {
+        earned: "5",
+        redeemed: null,
+        balance: 25
+      }
+    })));
+
+    assert.strictEqual(result.validation.valid, false);
+    assert.deepStrictEqual(result.validation.missingFields, []);
+    assert.ok(result.validation.typeErrors.some((error) => (
+      error.field === "loyalty.earned"
+      && error.expected === "number|null"
+      && error.actual === "string"
+    )));
+  });
+
   test("wrong primitive type", function() {
     const result = validate(repairResultFrom(makeValidReceipt({ subtotal: "42.50" })));
     assert.strictEqual(result.validation.valid, false);
@@ -130,7 +172,7 @@ function run() {
     assert.strictEqual(result.receipt, null);
     assert.strictEqual(result.validation.valid, false);
     assert.strictEqual(result.validation.parseSucceeded, false);
-    assert.deepStrictEqual(result.validation.missingFields, EXPECTED_RECEIPT_TOP_LEVEL_KEYS);
+    assert.deepStrictEqual(result.validation.missingFields, REQUIRED_RECEIPT_TOP_LEVEL_KEYS);
     assert.deepStrictEqual(result.validation.unexpectedFields, []);
     assert.deepStrictEqual(result.validation.typeErrors, []);
   });
@@ -187,7 +229,7 @@ function run() {
     assert.strictEqual(result.receipt.length, 0);
     assert.strictEqual(result.validation.valid, false);
     assert.strictEqual(result.validation.parseSucceeded, true);
-    assert.deepStrictEqual(result.validation.missingFields, EXPECTED_RECEIPT_TOP_LEVEL_KEYS);
+    assert.deepStrictEqual(result.validation.missingFields, REQUIRED_RECEIPT_TOP_LEVEL_KEYS);
     assert.deepStrictEqual(result.validation.typeErrors, [
       { field: "$", expected: "object", actual: "array" }
     ]);

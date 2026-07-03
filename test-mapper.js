@@ -186,6 +186,17 @@ function run() {
     });
   });
 
+  test("missing optional loyalty maps to null", function() {
+    const validationResult = makeValidationResult();
+    delete validationResult.receipt.loyalty;
+
+    const result = map(validationResult);
+
+    assert.strictEqual(result.mapping.mapped, true);
+    assert.strictEqual(result.mapping.sourceValid, true);
+    assert.strictEqual(result.receipt.loyalty, null);
+  });
+
   test("empty arrays", function() {
     const result = map(makeValidationResult({
       receipt: {
