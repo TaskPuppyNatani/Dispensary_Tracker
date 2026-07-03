@@ -17,6 +17,11 @@ class OpenAICompatibleReceiptVisionProvider {
     this.model = normalizeOptionalString(options.model);
     this.timeoutMs = readNonNegativeInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS, "timeoutMs");
     this.temperature = readFiniteNumber(options.temperature, DEFAULT_TEMPERATURE, "temperature");
+    this.defaultMaxNewTokens = readNonNegativeInteger(
+      options.defaultMaxNewTokens,
+      DEFAULT_MAX_NEW_TOKENS,
+      "defaultMaxNewTokens"
+    );
     this.fetchImpl = options.fetch || globalThis.fetch;
     this.initialized = false;
     this.initializationPromise = null;
@@ -52,7 +57,7 @@ class OpenAICompatibleReceiptVisionProvider {
     }
 
     const imageBuffer = readImageBuffer(input);
-    const generationSettings = resolveGenerationSettings(input);
+    const generationSettings = resolveGenerationSettings(input, this.defaultMaxNewTokens);
     const deterministicContext = normalizeDeterministicContext(input.deterministicContext);
     const ocrContext = normalizeOcrContextMetadata(input.ocrContext, deterministicContext);
     const requestBody = this._createRequestBody({
@@ -144,6 +149,14 @@ class OpenAICompatibleReceiptVisionProvider {
 
     if (Object.prototype.hasOwnProperty.call(options, "temperature")) {
       this.temperature = readFiniteNumber(options.temperature, DEFAULT_TEMPERATURE, "temperature");
+    }
+
+    if (Object.prototype.hasOwnProperty.call(options, "defaultMaxNewTokens")) {
+      this.defaultMaxNewTokens = readNonNegativeInteger(
+        options.defaultMaxNewTokens,
+        DEFAULT_MAX_NEW_TOKENS,
+        "defaultMaxNewTokens"
+      );
     }
   }
 
@@ -383,9 +396,9 @@ function hasPresentValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== "";
 }
 
-function resolveGenerationSettings(input = {}) {
+function resolveGenerationSettings(input = {}, defaultMaxNewTokens = DEFAULT_MAX_NEW_TOKENS) {
   return {
-    maxNewTokens: readNonNegativeInteger(input.maxNewTokens, DEFAULT_MAX_NEW_TOKENS, "maxNewTokens"),
+    maxNewTokens: readNonNegativeInteger(input.maxNewTokens, defaultMaxNewTokens, "maxNewTokens"),
     stopTokenIds: Object.prototype.hasOwnProperty.call(input, "stopTokenIds")
       ? readStopTokenIds(input.stopTokenIds)
       : [],

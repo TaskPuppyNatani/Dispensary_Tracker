@@ -50,6 +50,7 @@ function createOpenAICompatibleProviderOptions(localAISettings = createLocalAISe
     model: localAISettings.openAICompatibleModel,
     timeoutMs: localAISettings.openAICompatibleTimeoutMs,
     temperature: localAISettings.openAICompatibleTemperature,
+    defaultMaxNewTokens: localAISettings.openAICompatibleMaxNewTokens,
   };
 }
 

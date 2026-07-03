@@ -12,6 +12,7 @@ const DEFAULT_LOCAL_AI_SETTINGS = Object.freeze({
   openAICompatibleModel: "",
   openAICompatibleTimeoutMs: 120000,
   openAICompatibleTemperature: 0,
+  openAICompatibleMaxNewTokens: 2048,
 });
 
 function createLocalAISettings(overrides = {}) {
