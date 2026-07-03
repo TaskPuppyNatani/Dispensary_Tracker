@@ -1216,6 +1216,7 @@ import {
     addDetailLine(lines, "Payment", receipt.paymentMethod);
     addDetailLine(lines, "Budtender", receipt.budtender);
     addLoyaltyLine(lines, receipt.loyalty);
+    addProductsLine(lines, receipt.products);
 
     return lines;
   }
@@ -1246,6 +1247,24 @@ import {
 
     if (parts.length > 0) {
       lines.push(`Loyalty: ${parts.join(", ")}`);
+    }
+  }
+
+  function addProductsLine(lines, products) {
+    if (!Array.isArray(products) || products.length === 0) {
+      return;
+    }
+
+    const productSummaries = products
+      .filter((product) => product && typeof product === "object" && hasReviewValue(product.name))
+      .map((product) => {
+        const name = String(product.name).trim();
+        const quantity = hasReviewValue(product.quantity) ? ` x${product.quantity}` : "";
+        return `${name}${quantity}`;
+      });
+
+    if (productSummaries.length > 0) {
+      lines.push(`Products: ${productSummaries.join("; ")}`);
     }
   }
 
