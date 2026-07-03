@@ -9,63 +9,30 @@ const ReceiptProcessingPipeline = require("./ReceiptProcessingPipeline.js");
 
 const DEFAULT_RECEIPT_MAX_NEW_TOKENS = 384;
 
-const RECEIPT_EXTRACTION_PROMPT = `You are an AI specialized in reading cannabis dispensary receipts.
+const RECEIPT_EXTRACTION_PROMPT = `This is a receipt-reading diagnostic test.
 
-Analyze the attached receipt carefully.
+Describe only the text and numbers you can clearly read in the receipt image.
 
-Return ONLY a single valid JSON object.
+Do not produce JSON.
+Do not infer field names.
+Do not guess missing information.
+If something cannot be read confidently, write "unreadable".
 
-Use JSON null values, not the string "null".
-Use JSON numbers for monetary values when present.
-Do not return numeric values as strings unless they appear as non-numeric text on the receipt.
+Return a human-readable bullet list.
 
-Do not include markdown.
-Do not include explanations.
-Do not include comments.
-Do not wrap the JSON in code fences.
+Pay particular attention to:
+- Store name
+- Date
+- Time
+- Subtotal
+- Tax
+- Total
+- Receipt number
+- License number
+- Payment method
+- Loyalty information
 
-If a value cannot be determined from the receipt, use null.
-Do not guess.
-Do not infer missing information.
-Only extract information visible on the receipt.
-
-Extract:
-
-{
-  "dispensary": string|null,
-  "license_number": string|null,
-  "receipt_number": string|null,
-  "purchase_date": string|null,
-  "purchase_time": string|null,
-  "subtotal": number|null,
-  "tax": number|null,
-  "total": number|null,
-  "payment_method": string|null,
-  "budtender": string|null,
-  "discounts": [
-    {
-      "description": string,
-      "amount": number|null
-    }
-  ],
-  "loyalty": {
-    "earned": number|null,
-    "redeemed": number|null,
-    "balance": number|null
-  },
-  "products": [
-    {
-      "name": string,
-      "brand": string|null,
-      "category": string|null,
-      "quantity": number|null,
-      "unit_price": number|null,
-      "total_price": number|null
-    }
-  ]
-}
-
-Return nothing except the JSON object.`;
+Only report what is clearly visible in the image.`;
 
 class MainProcessReceiptVisionProvider {
   constructor(options = {}) {
