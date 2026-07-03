@@ -574,6 +574,10 @@ import {
       elements.localAIReviewBtn.addEventListener("click", onRunLocalAIReview);
     }
 
+    if (elements.applyAISuggestionsBtn) {
+      elements.applyAISuggestionsBtn.addEventListener("click", onApplyAISuggestions);
+    }
+
     if (elements.cancelEditBtn) {
       elements.cancelEditBtn.addEventListener("click", onCancelEdit);
     }
@@ -1011,7 +1015,7 @@ import {
   }
 
   function updateLocalAIReviewControls(message = "") {
-    if (!elements.localAIReviewBtn && !elements.localAIReviewStatus) {
+    if (!elements.localAIReviewBtn && !elements.applyAISuggestionsBtn && !elements.localAIReviewStatus) {
       return;
     }
 
@@ -1024,6 +1028,10 @@ import {
 
     if (elements.localAIReviewBtn) {
       elements.localAIReviewBtn.disabled = disabled;
+    }
+
+    if (elements.applyAISuggestionsBtn) {
+      elements.applyAISuggestionsBtn.disabled = !hasApplicableAISuggestions(state.receiptReviewModel);
     }
 
     if (!elements.localAIReviewStatus) {
@@ -1056,6 +1064,211 @@ import {
     }
 
     elements.localAIReviewStatus.textContent = "Local AI ready";
+  }
+
+  function hasApplicableAISuggestions(reviewModel = state.receiptReviewModel) {
+    const receipt = getMappedAIReceipt(reviewModel);
+    if (!receipt) {
+      return false;
+    }
+
+    return Boolean(
+      (elements.locationInput && hasReviewValue(receipt.dispensary))
+      || (elements.licenseInput && hasReviewValue(receipt.licenseNumber))
+      || (elements.dateInput && normalizeDateInputValue(receipt.purchaseDate))
+      || (elements.timeInput && normalizeTimeInputValue(receipt.purchaseTime))
+      || (elements.amountInput && normalizeAmountInputValue(receipt.total))
+    );
+  }
+
+  function getMappedAIReceipt(reviewModel = state.receiptReviewModel) {
+    const advisory = reviewModel && typeof reviewModel === "object" && reviewModel.advisory && typeof reviewModel.advisory === "object"
+      ? reviewModel.advisory
+      : null;
+    const receipt = advisory && advisory.receipt && typeof advisory.receipt === "object" && !Array.isArray(advisory.receipt)
+      ? advisory.receipt
+      : null;
+
+    return receipt;
+  }
+
+  function onApplyAISuggestions() {
+    const receipt = getMappedAIReceipt();
+    if (!receipt) {
+      setStatus("No mapped AI receipt is available to apply.", "warn");
+      updateLocalAIReviewControls();
+      return;
+    }
+
+    const applied = [];
+    const skipped = [];
+
+    applyTextSuggestion({
+      input: elements.locationInput,
+      label: "dispensary",
+      value: receipt.dispensary,
+      applied,
+    });
+    applyTextSuggestion({
+      input: elements.licenseInput,
+      label: "license",
+      value: receipt.licenseNumber,
+      applied,
+    });
+    applyNormalizedSuggestion({
+      input: elements.dateInput,
+      label: "date",
+      value: receipt.purchaseDate,
+      normalize: normalizeDateInputValue,
+      applied,
+      skipped,
+    });
+    applyNormalizedSuggestion({
+      input: elements.timeInput,
+      label: "time",
+      value: receipt.purchaseTime,
+      normalize: normalizeTimeInputValue,
+      applied,
+      skipped,
+    });
+    applyNormalizedSuggestion({
+      input: elements.amountInput,
+      label: "amount",
+      value: receipt.total,
+      normalize: normalizeAmountInputValue,
+      applied,
+      skipped,
+    });
+
+    updateLocalAIReviewControls();
+
+    if (applied.length === 0) {
+      const skippedSuffix = skipped.length > 0 ? ` Skipped ${skipped.join(", ")}.` : "";
+      setStatus(`No editable AI suggestions were applied.${skippedSuffix}`, "warn");
+      return;
+    }
+
+    const skippedSuffix = skipped.length > 0 ? ` Skipped ${skipped.join(", ")}.` : "";
+    setStatus(
+      `Applied ${applied.length} AI suggestion${applied.length === 1 ? "" : "s"}: ${applied.join(", ")}. Review before saving.${skippedSuffix}`,
+      "success"
+    );
+  }
+
+  function applyTextSuggestion({ input, label, value, applied }) {
+    if (!input || !hasReviewValue(value)) {
+      return;
+    }
+
+    input.value = String(value).trim();
+    applied.push(label);
+  }
+
+  function applyNormalizedSuggestion({ input, label, value, normalize, applied, skipped }) {
+    if (!input || !hasReviewValue(value)) {
+      return;
+    }
+
+    const normalized = normalize(value);
+    if (!normalized) {
+      skipped.push(label);
+      return;
+    }
+
+    input.value = normalized;
+    applied.push(label);
+  }
+
+  function normalizeDateInputValue(value) {
+    if (!hasReviewValue(value)) {
+      return "";
+    }
+
+    const raw = String(value).trim();
+    const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch && isValidDateParts(Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3]))) {
+      return raw;
+    }
+
+    const slashMatch = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slashMatch) {
+      const month = Number(slashMatch[1]);
+      const day = Number(slashMatch[2]);
+      const year = Number(slashMatch[3]);
+      if (isValidDateParts(year, month, day)) {
+        return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+    }
+
+    return "";
+  }
+
+  function isValidDateParts(year, month, day) {
+    if (!Number.isSafeInteger(year) || !Number.isSafeInteger(month) || !Number.isSafeInteger(day)) {
+      return false;
+    }
+
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCFullYear() === year
+      && date.getUTCMonth() === month - 1
+      && date.getUTCDate() === day;
+  }
+
+  function normalizeTimeInputValue(value) {
+    if (!hasReviewValue(value)) {
+      return "";
+    }
+
+    const raw = String(value).trim();
+    const twentyFourHourMatch = raw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+    if (twentyFourHourMatch) {
+      const hour = Number(twentyFourHourMatch[1]);
+      const minute = Number(twentyFourHourMatch[2]);
+      return isValidTimeParts(hour, minute)
+        ? `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
+        : "";
+    }
+
+    const meridiemMatch = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i);
+    if (meridiemMatch) {
+      let hour = Number(meridiemMatch[1]);
+      const minute = meridiemMatch[2] === undefined ? 0 : Number(meridiemMatch[2]);
+      const meridiem = meridiemMatch[3].toUpperCase();
+
+      if (hour < 1 || hour > 12 || !isValidTimeParts(0, minute)) {
+        return "";
+      }
+
+      if (meridiem === "AM") {
+        hour = hour === 12 ? 0 : hour;
+      } else {
+        hour = hour === 12 ? 12 : hour + 12;
+      }
+
+      return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+    }
+
+    return "";
+  }
+
+  function isValidTimeParts(hour, minute) {
+    return Number.isSafeInteger(hour)
+      && Number.isSafeInteger(minute)
+      && hour >= 0
+      && hour <= 23
+      && minute >= 0
+      && minute <= 59;
+  }
+
+  function normalizeAmountInputValue(value) {
+    if (!hasReviewValue(value)) {
+      return "";
+    }
+
+    const normalized = Number.parseFloat(String(value).replace(/[$,]/g, "").trim());
+    return Number.isFinite(normalized) && normalized >= 0
+      ? normalized.toFixed(2)
+      : "";
   }
 
   async function onRunLocalAIReview() {

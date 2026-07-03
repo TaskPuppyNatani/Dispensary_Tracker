@@ -53,6 +53,7 @@ export const elements = {
 	receiptReviewDebug: document.getElementById("receiptReviewDebug"),
 	receiptReviewDebugText: document.getElementById("receiptReviewDebugText"),
 	localAIReviewBtn: document.getElementById("localAIReviewBtn"),
+	applyAISuggestionsBtn: document.getElementById("applyAISuggestionsBtn"),
 	localAIReviewStatus: document.getElementById("localAIReviewStatus"),
 	receiptRows: document.getElementById("receiptRows"),
 	rowTemplate: document.getElementById("rowTemplate"),
