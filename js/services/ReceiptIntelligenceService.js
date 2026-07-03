@@ -1,5 +1,6 @@
 import { assertReceiptAIProvider } from "./ReceiptAIProvider.js";
 import { NullProvider } from "./providers/NullProvider.js";
+import { extractPhoneFromText } from "../matcher.js";
 
 const SERVICE_STATUSES = new Set(["skipped", "noop", "error"]);
 const SERVICE_REASONS = new Set([
@@ -280,7 +281,7 @@ async function runLocalAIAdvisory({ trace, options, service }) {
 
   const providerInput = {
     ...imageInput,
-    ...readLocalAIGenerationOptions(options),
+    ...readLocalAIGenerationOptions(trace, options),
   };
 
   try {
@@ -372,7 +373,7 @@ function hasUsableImageValue(value) {
   return value !== undefined && value !== null && value !== "";
 }
 
-function readLocalAIGenerationOptions(options = {}) {
+function readLocalAIGenerationOptions(trace, options = {}) {
   const generationOptions = {};
 
   for (const field of ["maxNewTokens", "stopTokenIds", "imageLayouts"]) {
@@ -381,7 +382,87 @@ function readLocalAIGenerationOptions(options = {}) {
     }
   }
 
+  const deterministicContext = buildDeterministicContext(trace, options);
+  if (deterministicContext) {
+    generationOptions.deterministicContext = deterministicContext;
+  }
+
+  const ocrContext = buildOcrContextMetadata(deterministicContext);
+  if (ocrContext) {
+    generationOptions.ocrContext = ocrContext;
+  }
+
   return generationOptions;
+}
+
+function buildDeterministicContext(trace, options = {}) {
+  const traceRecord = isRecord(trace)
+    ? trace
+    : null;
+  if (!traceRecord) {
+    return null;
+  }
+
+  const finalRendered = isRecord(traceRecord.finalRendered) ? traceRecord.finalRendered : {};
+  const rawOcrText = String(
+    options && Object.prototype.hasOwnProperty.call(options, "rawOcrText")
+      ? options.rawOcrText
+      : ""
+  ).trim();
+
+  const deterministicContext = {
+    dispensary: normalizeNullableString(finalRendered.location),
+    license_number: normalizeNullableString(finalRendered.license),
+    purchase_date: normalizeNullableString(finalRendered.date),
+    purchase_time: normalizeNullableString(finalRendered.time),
+    subtotal: null,
+    tax: null,
+    total: normalizeNullableNumber(finalRendered.amount),
+    phone: extractPhoneFromText(rawOcrText),
+    address: normalizeNullableString(traceRecord.detectedPhysicalAddress),
+    rawOcrText: rawOcrText || null,
+  };
+
+  return deterministicContext;
+}
+
+function buildOcrContextMetadata(deterministicContext) {
+  if (!isRecord(deterministicContext)) {
+    return null;
+  }
+
+  const fieldCount = [
+    deterministicContext.dispensary,
+    deterministicContext.license_number,
+    deterministicContext.purchase_date,
+    deterministicContext.purchase_time,
+    deterministicContext.subtotal,
+    deterministicContext.tax,
+    deterministicContext.total,
+    deterministicContext.phone,
+    deterministicContext.address,
+  ].reduce((count, value) => count + (hasPresentValue(value) ? 1 : 0), 0);
+  const rawTextLength = String(deterministicContext.rawOcrText || "").length;
+
+  return {
+    provided: fieldCount > 0 || rawTextLength > 0,
+    fieldCount,
+    rawTextLength,
+  };
+}
+
+function normalizeNullableString(value) {
+  const normalized = String(value || "").trim();
+  return normalized || null;
+}
+
+function normalizeNullableNumber(value) {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function hasPresentValue(value) {
+  return value !== null && value !== undefined && String(value).trim() !== "";
 }
 
 function createLocalAIAdvisory({

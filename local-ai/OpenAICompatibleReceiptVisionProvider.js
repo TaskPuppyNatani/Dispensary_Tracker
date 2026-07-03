@@ -53,9 +53,13 @@ class OpenAICompatibleReceiptVisionProvider {
 
     const imageBuffer = readImageBuffer(input);
     const generationSettings = resolveGenerationSettings(input);
+    const deterministicContext = normalizeDeterministicContext(input.deterministicContext);
+    const ocrContext = normalizeOcrContextMetadata(input.ocrContext, deterministicContext);
     const requestBody = this._createRequestBody({
       imageBuffer,
       maxTokens: generationSettings.maxNewTokens,
+      deterministicContext,
+      ocrContext,
     });
     const startedAt = Date.now();
     const response = await fetchJsonWithTimeout(this.fetchImpl, this.baseUrl, {
@@ -82,6 +86,7 @@ class OpenAICompatibleReceiptVisionProvider {
         stoppedBy: readFinishReason(response.body),
       },
       generationSettings,
+      ocrContext,
       request: {
         temperature: this.temperature,
         maxTokens: generationSettings.maxNewTokens,
@@ -219,27 +224,36 @@ class OpenAICompatibleReceiptVisionProvider {
     }
   }
 
-  _createRequestBody({ imageBuffer, maxTokens }) {
+  _createRequestBody({ imageBuffer, maxTokens, deterministicContext, ocrContext }) {
     const dataUrl = createImageDataUrl(imageBuffer);
     const model = this.resolvedModel || this.model || FALLBACK_MODEL_ID;
+    const contextText = buildOcrContextText(deterministicContext, ocrContext);
+    const content = [];
+
+    if (contextText) {
+      content.push({
+        type: "text",
+        text: contextText,
+      });
+    }
+
+    content.push({
+      type: "text",
+      text: RECEIPT_EXTRACTION_PROMPT,
+    });
+    content.push({
+      type: "image_url",
+      image_url: {
+        url: dataUrl,
+      },
+    });
 
     return {
       model,
       messages: [
         {
           role: "user",
-          content: [
-            {
-              type: "text",
-              text: RECEIPT_EXTRACTION_PROMPT,
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: dataUrl,
-              },
-            },
-          ],
+          content,
         },
       ],
       max_tokens: maxTokens,
@@ -294,6 +308,79 @@ function readImageBuffer(input = {}) {
 
 function createImageDataUrl(imageBuffer) {
   return `data:image/jpeg;base64,${Buffer.from(imageBuffer).toString("base64")}`;
+}
+
+function buildOcrContextText(deterministicContext, ocrContext) {
+  if (!normalizeOcrContextMetadata(ocrContext, deterministicContext).provided) {
+    return "";
+  }
+
+  return [
+    "The following OCR values were extracted deterministically from the receipt. Use them as trusted context. Focus your visual analysis on fields that are missing, incomplete, or ambiguous. If the image clearly contradicts an OCR value, you may return the corrected value.",
+    "OCR context:",
+    JSON.stringify({
+      deterministicContext: deterministicContext || null,
+      ocrContext: normalizeOcrContextMetadata(ocrContext, deterministicContext),
+    }, null, 2),
+  ].join("\n\n");
+}
+
+function normalizeDeterministicContext(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return {
+    dispensary: normalizeNullableString(value.dispensary),
+    license_number: normalizeNullableString(value.license_number),
+    purchase_date: normalizeNullableString(value.purchase_date),
+    purchase_time: normalizeNullableString(value.purchase_time),
+    subtotal: normalizeNullableNumber(value.subtotal),
+    tax: normalizeNullableNumber(value.tax),
+    total: normalizeNullableNumber(value.total),
+    phone: normalizeNullableString(value.phone),
+    address: normalizeNullableString(value.address),
+    rawOcrText: normalizeNullableString(value.rawOcrText),
+  };
+}
+
+function normalizeOcrContextMetadata(value, deterministicContext = null) {
+  const fieldCount = deterministicContext && typeof deterministicContext === "object"
+    ? [
+        deterministicContext.dispensary,
+        deterministicContext.license_number,
+        deterministicContext.purchase_date,
+        deterministicContext.purchase_time,
+        deterministicContext.subtotal,
+        deterministicContext.tax,
+        deterministicContext.total,
+        deterministicContext.phone,
+        deterministicContext.address,
+      ].reduce((count, fieldValue) => count + (hasPresentValue(fieldValue) ? 1 : 0), 0)
+    : 0;
+  const rawTextLength = deterministicContext && typeof deterministicContext.rawOcrText === "string"
+    ? deterministicContext.rawOcrText.length
+    : 0;
+
+  return {
+    provided: Boolean(value && typeof value === "object" && value.provided !== false && (value.provided || fieldCount > 0 || rawTextLength > 0)),
+    fieldCount: Number.isSafeInteger(value && value.fieldCount) ? value.fieldCount : fieldCount,
+    rawTextLength: Number.isSafeInteger(value && value.rawTextLength) ? value.rawTextLength : rawTextLength,
+  };
+}
+
+function normalizeNullableString(value) {
+  const normalized = String(value || "").trim();
+  return normalized || null;
+}
+
+function normalizeNullableNumber(value) {
+  const normalized = Number(value);
+  return Number.isFinite(normalized) ? normalized : null;
+}
+
+function hasPresentValue(value) {
+  return value !== null && value !== undefined && String(value).trim() !== "";
 }
 
 function resolveGenerationSettings(input = {}) {

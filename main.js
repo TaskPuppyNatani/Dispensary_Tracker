@@ -167,7 +167,7 @@ function readReceiptAnalysisPayload(payload = {}) {
     imageBuffer: readImageBufferFromPayload(payload),
   };
 
-  for (const field of ["maxNewTokens", "stopTokenIds", "imageLayouts"]) {
+  for (const field of ["maxNewTokens", "stopTokenIds", "imageLayouts", "deterministicContext", "ocrContext"]) {
     if (
       payload
       && Object.prototype.hasOwnProperty.call(payload, field)

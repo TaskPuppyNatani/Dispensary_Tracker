@@ -7,7 +7,7 @@ function createReceiptAnalysisPayload(input = {}) {
     imageBuffer: input.imageBuffer,
   };
 
-  for (const field of ["maxNewTokens", "stopTokenIds", "imageLayouts"]) {
+  for (const field of ["maxNewTokens", "stopTokenIds", "imageLayouts", "deterministicContext", "ocrContext"]) {
     if (Object.prototype.hasOwnProperty.call(input, field) && input[field] !== undefined) {
       payload[field] = input[field];
     }

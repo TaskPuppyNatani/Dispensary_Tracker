@@ -145,6 +145,73 @@ async function run() {
     assert.strictEqual(result.metadata.request.stopTokenIdsApplied, false);
   });
 
+  await test("includes deterministic OCR context in prompt and metadata", async function() {
+    const receipt = makeReceipt();
+    const fetchMock = createFetchMock(async (url, options, callNumber) => {
+      if (callNumber === 1) {
+        return createResponse({
+          data: [{ id: "qwen-test-model" }],
+        });
+      }
+
+      const body = JSON.parse(options.body);
+      assert.strictEqual(body.messages[0].content.length, 3);
+      assert.strictEqual(body.messages[0].content[0].type, "text");
+      assert.ok(body.messages[0].content[0].text.includes("The following OCR values were extracted deterministically from the receipt."));
+      assert.ok(body.messages[0].content[0].text.includes("\"dispensary\": \"Green Valley\""));
+      assert.ok(body.messages[0].content[0].text.includes("\"ocrContext\": {"));
+      assert.strictEqual(body.messages[0].content[1].type, "text");
+      assert.strictEqual(body.messages[0].content[1].text, RECEIPT_EXTRACTION_PROMPT);
+      assert.strictEqual(body.messages[0].content[2].type, "image_url");
+
+      return createResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify(receipt),
+            },
+            finish_reason: "stop",
+          },
+        ],
+        usage: {
+          completion_tokens: 11,
+        },
+      });
+    });
+
+    const provider = new OpenAICompatibleReceiptVisionProvider({
+      fetch: fetchMock,
+      model: "qwen-test-model",
+    });
+
+    await provider.initialize();
+    const result = await provider.analyzeReceipt({
+      imageBuffer: Buffer.from("receipt-image"),
+      deterministicContext: {
+        dispensary: "Green Valley",
+        license_number: "LIC-123",
+        purchase_date: "2026-07-02",
+        purchase_time: "10:30 AM",
+        subtotal: null,
+        tax: null,
+        total: 46.7,
+        phone: "5035551212",
+        address: "123 Main St, Portland, OR 97201",
+        rawOcrText: "Green Valley 123 Main St",
+      },
+      ocrContext: {
+        provided: true,
+        fieldCount: 5,
+        rawTextLength: 24,
+      },
+    });
+
+    assert.strictEqual(result.metadata.ocrContext.provided, true);
+    assert.strictEqual(result.metadata.ocrContext.fieldCount, 5);
+    assert.strictEqual(result.metadata.ocrContext.rawTextLength, 24);
+    assert.strictEqual(result.metadata.generation.generatedTokenCount, 11);
+  });
+
   await test("uses provider default max tokens when not overridden", async function() {
     const receipt = makeReceipt();
     const fetchMock = createFetchMock(async (url, options, callNumber) => {

@@ -1087,6 +1087,8 @@ import {
             maxNewTokens: input.maxNewTokens,
             stopTokenIds: input.stopTokenIds,
             imageLayouts: input.imageLayouts,
+            deterministicContext: input.deterministicContext,
+            ocrContext: input.ocrContext,
           });
         },
       };
@@ -1096,6 +1098,7 @@ import {
         forceLocalAIReview: true,
         localAIProvider,
         imageBuffer,
+        rawOcrText: state.lastOcrText,
       });
       state.lastReceiptIntelligenceResult = intelligenceResult;
       state.receiptReviewModel = buildReceiptReviewModel({
