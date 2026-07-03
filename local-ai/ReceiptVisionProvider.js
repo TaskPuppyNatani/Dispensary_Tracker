@@ -5,6 +5,7 @@ const { OnnxVisionRuntime } = require("./OnnxVisionRuntime.js");
 const { SmolVLMModelAdapter } = require("./adapters/SmolVLMModelAdapter.js");
 const { SmolVLMImageProcessor } = require("./adapters/SmolVLMImageProcessor.js");
 const { SmolVLMTokenizer } = require("./adapters/SmolVLMTokenizer.js");
+const ReceiptProcessingPipeline = require("./ReceiptProcessingPipeline.js");
 
 const DEFAULT_RECEIPT_MAX_NEW_TOKENS = 384;
 
@@ -116,19 +117,23 @@ class MainProcessReceiptVisionProvider {
       imageLayouts: input.imageLayouts,
     });
     const generationTimeMs = Date.now() - generationStartedAt;
+    const metadata = {
+      providerName: this.name,
+      modelId: this.modelInspection ? this.modelInspection.modelId : "",
+      initializationTimeMs: this.initializationTimeMs,
+      generationTimeMs,
+      runtimeStatus: this.runtime.getStatus(),
+      generation: generation.metadata,
+      generationSettings,
+    };
+    const pipelineResult = ReceiptProcessingPipeline.process({
+      text: generation.text,
+      metadata,
+    });
 
     return {
-      status: "generated",
-      text: generation.text,
-      metadata: {
-        providerName: this.name,
-        modelId: this.modelInspection ? this.modelInspection.modelId : "",
-        initializationTimeMs: this.initializationTimeMs,
-        generationTimeMs,
-        runtimeStatus: this.runtime.getStatus(),
-        generation: generation.metadata,
-        generationSettings,
-      },
+      ...pipelineResult,
+      metadata,
     };
   }
 
