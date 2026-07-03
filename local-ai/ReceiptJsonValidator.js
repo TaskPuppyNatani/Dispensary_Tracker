@@ -43,7 +43,7 @@ const PRODUCT_SCHEMA = {
 };
 
 const DISCOUNT_SCHEMA = {
-  description: "string",
+  description: "string|null",
   amount: "number|null"
 };
 

@@ -101,6 +101,52 @@ function run() {
     assert.deepStrictEqual(result.validation.typeErrors, []);
   });
 
+  test("string discount description validates", function() {
+    const result = validate(repairResultFrom(makeValidReceipt({
+      discounts: [
+        {
+          description: "Loyalty",
+          amount: 2
+        }
+      ]
+    })));
+
+    assert.strictEqual(result.validation.valid, true);
+    assert.deepStrictEqual(result.validation.typeErrors, []);
+  });
+
+  test("null discount description validates", function() {
+    const result = validate(repairResultFrom(makeValidReceipt({
+      discounts: [
+        {
+          description: null,
+          amount: 2
+        }
+      ]
+    })));
+
+    assert.strictEqual(result.validation.valid, true);
+    assert.deepStrictEqual(result.validation.typeErrors, []);
+  });
+
+  test("invalid discount description type fails", function() {
+    const result = validate(repairResultFrom(makeValidReceipt({
+      discounts: [
+        {
+          description: 123,
+          amount: 2
+        }
+      ]
+    })));
+
+    assert.strictEqual(result.validation.valid, false);
+    assert.ok(result.validation.typeErrors.some((error) => (
+      error.field === "discounts[0].description"
+      && error.expected === "string|null"
+      && error.actual === "number"
+    )));
+  });
+
   test("present invalid loyalty fails", function() {
     const result = validate(repairResultFrom(makeValidReceipt({
       loyalty: {

@@ -186,6 +186,48 @@ function run() {
     });
   });
 
+  test("null discount description maps", function() {
+    const result = map(makeValidationResult({
+      receipt: {
+        dispensary: "Green Valley",
+        license_number: "LIC-123",
+        receipt_number: "R-100",
+        purchase_date: "2026-07-02",
+        purchase_time: "10:30 AM",
+        subtotal: 42.5,
+        tax: 4.2,
+        total: 46.7,
+        payment_method: "cash",
+        budtender: "Alex",
+        discounts: [
+          {
+            description: null,
+            amount: 2
+          }
+        ],
+        loyalty: {
+          earned: 10,
+          redeemed: null,
+          balance: 50
+        },
+        products: [
+          {
+            name: "Blue Dream",
+            brand: "Acme",
+            category: "flower",
+            quantity: 1,
+            unit_price: 40,
+            total_price: 40
+          }
+        ]
+      }
+    }));
+
+    assert.strictEqual(result.mapping.mapped, true);
+    assert.strictEqual(result.mapping.sourceValid, true);
+    assert.strictEqual(result.receipt.discounts[0].description, null);
+  });
+
   test("missing optional loyalty maps to null", function() {
     const validationResult = makeValidationResult();
     delete validationResult.receipt.loyalty;

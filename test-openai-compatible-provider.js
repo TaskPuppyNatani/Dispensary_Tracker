@@ -145,6 +145,48 @@ async function run() {
     assert.strictEqual(result.metadata.request.stopTokenIdsApplied, false);
   });
 
+  await test("uses provider default max tokens when not overridden", async function() {
+    const receipt = makeReceipt();
+    const fetchMock = createFetchMock(async (url, options, callNumber) => {
+      if (callNumber === 1) {
+        return createResponse({
+          data: [{ id: "qwen-test-model" }],
+        });
+      }
+
+      const body = JSON.parse(options.body);
+      assert.strictEqual(body.max_tokens, 2048);
+
+      return createResponse({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify(receipt),
+            },
+            finish_reason: "stop",
+          },
+        ],
+        usage: {
+          completion_tokens: 7,
+        },
+      });
+    });
+
+    const provider = new OpenAICompatibleReceiptVisionProvider({
+      fetch: fetchMock,
+      model: "qwen-test-model",
+    });
+
+    await provider.initialize();
+    const result = await provider.analyzeReceipt({
+      imageBuffer: Buffer.from("receipt-image"),
+    });
+
+    assert.strictEqual(result.metadata.generationSettings.maxNewTokens, 2048);
+    assert.strictEqual(result.metadata.request.maxTokens, 2048);
+    assert.strictEqual(result.metadata.generation.stoppedBy, "stop");
+  });
+
   await test("uses first reported model when no model is configured", async function() {
     const fetchMock = createFetchMock(async () => createResponse({
       data: [{ id: "first-model" }, { id: "second-model" }],

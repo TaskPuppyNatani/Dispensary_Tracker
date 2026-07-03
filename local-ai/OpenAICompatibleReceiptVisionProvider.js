@@ -5,7 +5,7 @@ const { RECEIPT_EXTRACTION_PROMPT } = require("./ReceiptExtractionPrompt.js");
 
 const DEFAULT_BASE_URL = "http://localhost:1234/v1/chat/completions";
 const DEFAULT_PROVIDER_NAME = "OpenAICompatibleReceiptVisionProvider";
-const DEFAULT_MAX_NEW_TOKENS = 384;
+const DEFAULT_MAX_NEW_TOKENS = 2048;
 const DEFAULT_TIMEOUT_MS = 120000;
 const DEFAULT_TEMPERATURE = 0;
 const FALLBACK_MODEL_ID = "local-model";
