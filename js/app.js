@@ -1140,6 +1140,13 @@ import {
       skipped,
     });
 
+    const notesResult = applyAIReviewDetailsToNotes(receipt);
+    if (notesResult.applied) {
+      applied.push("notes");
+    } else if (notesResult.skippedReason === "no-details") {
+      skipped.push("notes");
+    }
+
     updateLocalAIReviewControls();
 
     if (applied.length === 0) {
@@ -1149,8 +1156,9 @@ import {
     }
 
     const skippedSuffix = skipped.length > 0 ? ` Skipped ${skipped.join(", ")}.` : "";
+    const truncatedSuffix = notesResult.truncated ? " AI review details were shortened to fit notes." : "";
     setStatus(
-      `Applied ${applied.length} AI suggestion${applied.length === 1 ? "" : "s"}: ${applied.join(", ")}. Review before saving.${skippedSuffix}`,
+      `Applied ${applied.length} AI suggestion${applied.length === 1 ? "" : "s"}: ${applied.join(", ")}. Review before saving.${skippedSuffix}${truncatedSuffix}`,
       "success"
     );
   }
@@ -1177,6 +1185,118 @@ import {
 
     input.value = normalized;
     applied.push(label);
+  }
+
+  function applyAIReviewDetailsToNotes(receipt) {
+    if (!elements.notesInput) {
+      return { applied: false, truncated: false, skippedReason: "missing-input" };
+    }
+
+    const lines = buildAIReviewDetailLines(receipt);
+    if (lines.length === 0) {
+      return { applied: false, truncated: false, skippedReason: "no-details" };
+    }
+
+    const maxLength = readNotesMaxLength();
+    const existingUserNotes = removeAIReviewDetailsSection(elements.notesInput.value || "").trim();
+    const sectionResult = buildAIReviewDetailsSection(lines, existingUserNotes, maxLength);
+
+    if (!sectionResult.section) {
+      return { applied: false, truncated: true, skippedReason: "no-space" };
+    }
+
+    elements.notesInput.value = joinNotesSections(existingUserNotes, sectionResult.section);
+    return { applied: true, truncated: sectionResult.truncated, skippedReason: null };
+  }
+
+  function buildAIReviewDetailLines(receipt) {
+    const lines = [];
+
+    addDetailLine(lines, "Receipt #", receipt.receiptNumber);
+    addDetailLine(lines, "Payment", receipt.paymentMethod);
+    addDetailLine(lines, "Budtender", receipt.budtender);
+    addLoyaltyLine(lines, receipt.loyalty);
+
+    return lines;
+  }
+
+  function addDetailLine(lines, label, value) {
+    if (!hasReviewValue(value)) {
+      return;
+    }
+
+    lines.push(`${label}: ${String(value).trim()}`);
+  }
+
+  function addLoyaltyLine(lines, loyalty) {
+    if (!loyalty || typeof loyalty !== "object" || Array.isArray(loyalty)) {
+      return;
+    }
+
+    const parts = [];
+    if (hasReviewValue(loyalty.earned)) {
+      parts.push(`earned ${loyalty.earned}`);
+    }
+    if (hasReviewValue(loyalty.redeemed)) {
+      parts.push(`redeemed ${loyalty.redeemed}`);
+    }
+    if (hasReviewValue(loyalty.balance)) {
+      parts.push(`balance ${loyalty.balance}`);
+    }
+
+    if (parts.length > 0) {
+      lines.push(`Loyalty: ${parts.join(", ")}`);
+    }
+  }
+
+  function readNotesMaxLength() {
+    const maxLength = elements.notesInput
+      ? Number.parseInt(elements.notesInput.getAttribute("maxlength") || "", 10)
+      : Number.NaN;
+    return Number.isSafeInteger(maxLength) && maxLength > 0 ? maxLength : 300;
+  }
+
+  function removeAIReviewDetailsSection(notes) {
+    return String(notes || "")
+      .replace(/(?:\n\s*)?--- AI Review Details ---[\s\S]*?--- End AI Review Details ---/g, "")
+      .trim();
+  }
+
+  function buildAIReviewDetailsSection(lines, userNotes, maxLength) {
+    const header = "--- AI Review Details ---";
+    const footer = "--- End AI Review Details ---";
+    const separatorLength = userNotes ? 2 : 0;
+    const availableLength = maxLength - userNotes.length - separatorLength;
+
+    if (availableLength < `${header}\n${footer}`.length) {
+      return { section: "", truncated: true };
+    }
+
+    const included = [];
+    let truncated = false;
+
+    for (const line of lines) {
+      const candidateLines = included.concat(line);
+      const candidateSection = `${header}\n${candidateLines.join("\n")}\n${footer}`;
+      if (candidateSection.length <= availableLength) {
+        included.push(line);
+      } else {
+        truncated = true;
+      }
+    }
+
+    if (included.length === 0) {
+      return { section: "", truncated: true };
+    }
+
+    return {
+      section: `${header}\n${included.join("\n")}\n${footer}`,
+      truncated,
+    };
+  }
+
+  function joinNotesSections(userNotes, aiSection) {
+    return userNotes ? `${userNotes}\n\n${aiSection}` : aiSection;
   }
 
   function normalizeDateInputValue(value) {
