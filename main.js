@@ -3,12 +3,16 @@ const path = require("path");
 const { createLocalAISettings, resolveModelDirectory } = require("./local-ai/config.js");
 const { ModelManager } = require("./local-ai/ModelManager.js");
 const { MainProcessReceiptVisionProvider } = require("./local-ai/ReceiptVisionProvider.js");
+const { OpenAICompatibleReceiptVisionProvider } = require("./local-ai/OpenAICompatibleReceiptVisionProvider.js");
 const { SmolVLMModelAdapter } = require("./local-ai/adapters/SmolVLMModelAdapter.js");
 
 let modelManager = null;
 let receiptVisionProvider = null;
+let receiptVisionProviderType = "";
 
 const DEFAULT_RECEIPT_MODEL_DIRECTORY_NAME = "SmolVLM2-500M";
+const RECEIPT_PROVIDER_OPENAI_COMPATIBLE = "openai-compatible";
+const RECEIPT_PROVIDER_SMOLVLM = "smolvlm";
 
 function getModelManager() {
   if (!modelManager) {
@@ -20,12 +24,33 @@ function getModelManager() {
   return modelManager;
 }
 
-function getReceiptVisionProvider() {
-  if (!receiptVisionProvider) {
-    receiptVisionProvider = new MainProcessReceiptVisionProvider();
+function getReceiptVisionProvider(localAISettings = createLocalAISettings()) {
+  const providerType = getConfiguredReceiptProviderType(localAISettings);
+
+  if (!receiptVisionProvider || receiptVisionProviderType !== providerType) {
+    receiptVisionProvider = providerType === RECEIPT_PROVIDER_OPENAI_COMPATIBLE
+      ? new OpenAICompatibleReceiptVisionProvider(createOpenAICompatibleProviderOptions(localAISettings))
+      : new MainProcessReceiptVisionProvider();
+    receiptVisionProviderType = providerType;
   }
 
   return receiptVisionProvider;
+}
+
+function getConfiguredReceiptProviderType(localAISettings = createLocalAISettings()) {
+  const providerType = String(localAISettings.receiptVisionProvider || "").trim().toLowerCase();
+  return providerType === RECEIPT_PROVIDER_SMOLVLM
+    ? RECEIPT_PROVIDER_SMOLVLM
+    : RECEIPT_PROVIDER_OPENAI_COMPATIBLE;
+}
+
+function createOpenAICompatibleProviderOptions(localAISettings = createLocalAISettings()) {
+  return {
+    baseUrl: localAISettings.openAICompatibleBaseUrl,
+    model: localAISettings.openAICompatibleModel,
+    timeoutMs: localAISettings.openAICompatibleTimeoutMs,
+    temperature: localAISettings.openAICompatibleTemperature,
+  };
 }
 
 function resolveConfiguredReceiptModelPath() {
@@ -46,16 +71,51 @@ async function inspectConfiguredReceiptModel() {
 }
 
 async function getReceiptReviewStatus() {
+  const localAISettings = createLocalAISettings();
+  const providerType = getConfiguredReceiptProviderType(localAISettings);
+
   if (receiptVisionProvider && receiptVisionProvider.initialized) {
     const status = receiptVisionProvider.getStatus();
     return {
       available: true,
       initialized: true,
       modelId: status.modelId || "",
+      providerType,
+      backend: status.backend || providerType,
       reason: null,
       missingFiles: [],
-      warnings: [],
+      warnings: status.healthStatus && Array.isArray(status.healthStatus.warnings)
+        ? status.healthStatus.warnings
+        : [],
     };
+  }
+
+  if (providerType === RECEIPT_PROVIDER_OPENAI_COMPATIBLE) {
+    try {
+      const provider = getReceiptVisionProvider(localAISettings);
+      const health = await provider.getHealthStatus(createOpenAICompatibleProviderOptions(localAISettings));
+      return {
+        available: Boolean(health.available),
+        initialized: false,
+        modelId: health.modelId || "",
+        providerType,
+        backend: health.backend || "openai-compatible",
+        reason: health.available ? null : health.reason || "openai_compatible_provider_unavailable",
+        missingFiles: [],
+        warnings: Array.isArray(health.warnings) ? health.warnings : [],
+      };
+    } catch (error) {
+      return {
+        available: false,
+        initialized: false,
+        modelId: "",
+        providerType,
+        backend: "openai-compatible",
+        reason: error && error.message ? error.message : String(error),
+        missingFiles: [],
+        warnings: [],
+      };
+    }
   }
 
   try {
@@ -64,6 +124,8 @@ async function getReceiptReviewStatus() {
       available: Boolean(inspection.supported),
       initialized: false,
       modelId: inspection.modelId || "",
+      providerType,
+      backend: "onnx",
       reason: inspection.supported ? null : "configured_model_unavailable",
       missingFiles: Array.isArray(inspection.missingFiles) ? inspection.missingFiles : [],
       warnings: Array.isArray(inspection.warnings) ? inspection.warnings : [],
@@ -73,6 +135,8 @@ async function getReceiptReviewStatus() {
       available: false,
       initialized: false,
       modelId: "",
+      providerType,
+      backend: "onnx",
       reason: error && error.message ? error.message : String(error),
       missingFiles: [],
       warnings: [],
@@ -139,10 +203,15 @@ function registerLocalAIHandlers() {
       throw new Error(status.reason || "Local AI receipt review is unavailable.");
     }
 
-    const modelPath = resolveConfiguredReceiptModelPath();
-    const provider = getReceiptVisionProvider();
+    const localAISettings = createLocalAISettings();
+    const providerType = getConfiguredReceiptProviderType(localAISettings);
+    const provider = getReceiptVisionProvider(localAISettings);
     if (!provider.initialized) {
-      await provider.initialize({ modelPath });
+      if (providerType === RECEIPT_PROVIDER_OPENAI_COMPATIBLE) {
+        await provider.initialize(createOpenAICompatibleProviderOptions(localAISettings));
+      } else {
+        await provider.initialize({ modelPath: resolveConfiguredReceiptModelPath() });
+      }
     }
 
     return await provider.analyzeReceipt(readReceiptAnalysisPayload(payload));

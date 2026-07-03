@@ -5,34 +5,10 @@ const { OnnxVisionRuntime } = require("./OnnxVisionRuntime.js");
 const { SmolVLMModelAdapter } = require("./adapters/SmolVLMModelAdapter.js");
 const { SmolVLMImageProcessor } = require("./adapters/SmolVLMImageProcessor.js");
 const { SmolVLMTokenizer } = require("./adapters/SmolVLMTokenizer.js");
+const { RECEIPT_EXTRACTION_PROMPT } = require("./ReceiptExtractionPrompt.js");
 const ReceiptProcessingPipeline = require("./ReceiptProcessingPipeline.js");
 
 const DEFAULT_RECEIPT_MAX_NEW_TOKENS = 384;
-
-const RECEIPT_EXTRACTION_PROMPT = `This is a receipt-reading diagnostic test.
-
-Describe only the text and numbers you can clearly read in the receipt image.
-
-Do not produce JSON.
-Do not infer field names.
-Do not guess missing information.
-If something cannot be read confidently, write "unreadable".
-
-Return a human-readable bullet list.
-
-Pay particular attention to:
-- Store name
-- Date
-- Time
-- Subtotal
-- Tax
-- Total
-- Receipt number
-- License number
-- Payment method
-- Loyalty information
-
-Only report what is clearly visible in the image.`;
 
 class MainProcessReceiptVisionProvider {
   constructor(options = {}) {

@@ -7,6 +7,11 @@ const DEFAULT_LOCAL_AI_SETTINGS = Object.freeze({
   modelDirectory: "models",
   selectedModel: "",
   autoReviewEnabled: false,
+  receiptVisionProvider: "openai-compatible",
+  openAICompatibleBaseUrl: "http://localhost:1234/v1/chat/completions",
+  openAICompatibleModel: "",
+  openAICompatibleTimeoutMs: 120000,
+  openAICompatibleTemperature: 0,
 });
 
 function createLocalAISettings(overrides = {}) {
