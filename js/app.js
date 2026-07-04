@@ -32,6 +32,7 @@ import { extractPhoneFromText, parseTextForStore } from "./matcher.js";
 import { ReceiptIntelligenceService } from "./services/ReceiptIntelligenceService.js";
 import { buildReceiptReviewModel } from "./services/ReceiptReviewModelBuilder.js";
 import { buildReceiptReviewSummary } from "./services/ReceiptReviewSummary.js";
+import { buildReceiptProductDisplay } from "./services/ReceiptProductDisplay.js";
 import { buildReceiptFormApplyPlan } from "./services/ReceiptSuggestionApply.js";
 import { NullProvider } from "./services/providers/NullProvider.js";
 import { elements, state } from "./state.js";
@@ -821,7 +822,7 @@ import {
 
     clearElement(elements.receiptReviewFields);
     renderReceiptReviewSummary(null);
-    renderReviewSection(elements.receiptReviewProducts, "", null);
+    renderReviewProductsSection(elements.receiptReviewProducts, null);
     renderReviewSection(elements.receiptReviewDiscounts, "", null);
     renderReviewSection(elements.receiptReviewLoyalty, "", null);
     renderReviewDebug(null);
@@ -852,7 +853,7 @@ import {
     }
 
     renderReceiptReviewSummary(reviewModel);
-    renderReviewSection(elements.receiptReviewProducts, "Products", reviewModel.products);
+    renderReviewProductsSection(elements.receiptReviewProducts, reviewModel.products);
     renderReviewSection(elements.receiptReviewDiscounts, "Discounts", reviewModel.discounts);
     renderReviewSection(elements.receiptReviewLoyalty, "Loyalty", reviewModel.loyalty);
     renderReviewDebug(reviewModel);
@@ -971,6 +972,66 @@ import {
     const pre = document.createElement("pre");
     pre.textContent = JSON.stringify(value, null, 2);
     container.append(heading, pre);
+    container.hidden = false;
+  }
+
+  function renderReviewProductsSection(container, products) {
+    if (!container) {
+      return;
+    }
+
+    clearElement(container);
+
+    if (products === null || products === undefined) {
+      container.hidden = true;
+      return;
+    }
+
+    const display = buildReceiptProductDisplay(products);
+    const heading = document.createElement("h4");
+    heading.textContent = "Products";
+    container.appendChild(heading);
+
+    if (display.items.length === 0) {
+      const empty = document.createElement("p");
+      empty.className = "receipt-review-empty";
+      empty.textContent = display.emptyMessage;
+      container.appendChild(empty);
+      container.hidden = false;
+      return;
+    }
+
+    const list = document.createElement("ul");
+    list.className = "receipt-review-product-list";
+
+    for (const product of display.items) {
+      const item = document.createElement("li");
+      item.className = "receipt-review-product";
+
+      const name = document.createElement("strong");
+      name.className = "receipt-review-product-name";
+      name.textContent = product.name;
+      item.appendChild(name);
+
+      if (product.details.length > 0) {
+        const details = document.createElement("dl");
+        details.className = "receipt-review-product-details";
+
+        for (const detail of product.details) {
+          const term = document.createElement("dt");
+          term.textContent = detail.label;
+          const value = document.createElement("dd");
+          value.textContent = detail.value;
+          details.append(term, value);
+        }
+
+        item.appendChild(details);
+      }
+
+      list.appendChild(item);
+    }
+
+    container.appendChild(list);
     container.hidden = false;
   }
 
