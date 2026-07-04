@@ -30,6 +30,10 @@ import {
 import { onScanReceipt } from "./ocr.js";
 import { extractPhoneFromText, parseTextForStore } from "./matcher.js";
 import { ReceiptIntelligenceService } from "./services/ReceiptIntelligenceService.js";
+import {
+  buildReceiptDiscountDisplay,
+  buildReceiptLoyaltyDisplay,
+} from "./services/ReceiptEnrichmentDisplay.js";
 import { buildReceiptReviewModel } from "./services/ReceiptReviewModelBuilder.js";
 import { buildReceiptReviewSummary } from "./services/ReceiptReviewSummary.js";
 import { buildReceiptProductDisplay } from "./services/ReceiptProductDisplay.js";
@@ -823,8 +827,8 @@ import {
     clearElement(elements.receiptReviewFields);
     renderReceiptReviewSummary(null);
     renderReviewProductsSection(elements.receiptReviewProducts, null);
-    renderReviewSection(elements.receiptReviewDiscounts, "", null);
-    renderReviewSection(elements.receiptReviewLoyalty, "", null);
+    renderReviewDiscountsSection(elements.receiptReviewDiscounts, null);
+    renderReviewLoyaltySection(elements.receiptReviewLoyalty, null);
     renderReviewDebug(null);
 
     if (!reviewModel || typeof reviewModel !== "object") {
@@ -854,8 +858,8 @@ import {
 
     renderReceiptReviewSummary(reviewModel);
     renderReviewProductsSection(elements.receiptReviewProducts, reviewModel.products);
-    renderReviewSection(elements.receiptReviewDiscounts, "Discounts", reviewModel.discounts);
-    renderReviewSection(elements.receiptReviewLoyalty, "Loyalty", reviewModel.loyalty);
+    renderReviewDiscountsSection(elements.receiptReviewDiscounts, reviewModel.discounts);
+    renderReviewLoyaltySection(elements.receiptReviewLoyalty, reviewModel.loyalty);
     renderReviewDebug(reviewModel);
     elements.receiptReviewPanel.hidden = false;
     updateLocalAIReviewControls();
@@ -951,30 +955,6 @@ import {
     return field.changed ? "different" : "same";
   }
 
-  function renderReviewSection(container, title, value) {
-    if (!container) {
-      return;
-    }
-
-    clearElement(container);
-
-    const hasContent = Array.isArray(value)
-      ? value.length > 0
-      : value !== null && value !== undefined && value !== "";
-
-    if (!hasContent) {
-      container.hidden = true;
-      return;
-    }
-
-    const heading = document.createElement("h4");
-    heading.textContent = title;
-    const pre = document.createElement("pre");
-    pre.textContent = JSON.stringify(value, null, 2);
-    container.append(heading, pre);
-    container.hidden = false;
-  }
-
   function renderReviewProductsSection(container, products) {
     if (!container) {
       return;
@@ -1033,6 +1013,107 @@ import {
 
     container.appendChild(list);
     container.hidden = false;
+  }
+
+  function renderReviewDiscountsSection(container, discounts) {
+    if (!container) {
+      return;
+    }
+
+    clearElement(container);
+
+    if (discounts === null || discounts === undefined) {
+      container.hidden = true;
+      return;
+    }
+
+    const display = buildReceiptDiscountDisplay(discounts);
+    const heading = document.createElement("h4");
+    heading.textContent = "Discounts";
+    container.appendChild(heading);
+
+    if (display.items.length === 0) {
+      appendReviewEmptyState(container, display.emptyMessage);
+      container.hidden = false;
+      return;
+    }
+
+    const list = document.createElement("ul");
+    list.className = "receipt-review-enrichment-list";
+
+    for (const discount of display.items) {
+      const item = document.createElement("li");
+      item.className = "receipt-review-enrichment-item";
+
+      const description = document.createElement("strong");
+      description.className = "receipt-review-enrichment-title";
+      description.textContent = discount.description;
+      item.appendChild(description);
+
+      appendReviewDetailList(item, discount.details);
+      list.appendChild(item);
+    }
+
+    container.appendChild(list);
+    container.hidden = false;
+  }
+
+  function renderReviewLoyaltySection(container, loyalty) {
+    if (!container) {
+      return;
+    }
+
+    clearElement(container);
+
+    if (loyalty === null || loyalty === undefined) {
+      container.hidden = true;
+      return;
+    }
+
+    const display = buildReceiptLoyaltyDisplay(loyalty);
+    const heading = document.createElement("h4");
+    heading.textContent = "Loyalty";
+    container.appendChild(heading);
+
+    if (display.items.length === 0) {
+      appendReviewEmptyState(container, display.emptyMessage);
+      container.hidden = false;
+      return;
+    }
+
+    const details = document.createElement("dl");
+    details.className = "receipt-review-enrichment-details";
+    appendReviewDetails(details, display.items);
+    container.appendChild(details);
+    container.hidden = false;
+  }
+
+  function appendReviewEmptyState(container, message) {
+    const empty = document.createElement("p");
+    empty.className = "receipt-review-empty";
+    empty.textContent = message;
+    container.appendChild(empty);
+  }
+
+  function appendReviewDetailList(container, details) {
+    if (!Array.isArray(details) || details.length === 0) {
+      return;
+    }
+
+    const detailList = document.createElement("dl");
+    detailList.className = "receipt-review-enrichment-details";
+    appendReviewDetails(detailList, details);
+    container.appendChild(detailList);
+  }
+
+  function appendReviewDetails(detailList, details) {
+    for (const detail of details) {
+      const term = document.createElement("dt");
+      term.textContent = detail.label;
+      const value = document.createElement("dd");
+      value.textContent = detail.value;
+      detailList.append(term, value);
+    }
   }
 
   function renderReviewDebug(reviewModel) {
