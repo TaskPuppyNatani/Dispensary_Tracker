@@ -327,6 +327,60 @@ textarea {
   gap: 0.45rem;
 }
 
+.receipt-review-summary {
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem;
+  background: color-mix(in srgb, var(--surface) 90%, black 7%);
+}
+
+.receipt-review-summary h4 {
+  margin: 0 0 0.45rem;
+  font-size: 0.86rem;
+}
+
+.receipt-review-summary-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-bottom: 0.45rem;
+}
+
+.receipt-review-summary-count {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.24rem 0.52rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.receipt-review-summary-count.is-same {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--line));
+}
+
+.receipt-review-summary-count.is-suggested {
+  color: var(--accent-2);
+  border-color: color-mix(in srgb, var(--accent-2) 48%, var(--line));
+}
+
+.receipt-review-summary-count.is-different {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 52%, var(--line));
+}
+
+.receipt-review-summary p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.receipt-review-summary p.is-conflict {
+  color: color-mix(in srgb, var(--danger) 82%, white 18%);
+}
+
 .receipt-review-row {
   display: grid;
   grid-template-columns: minmax(90px, 0.8fr) minmax(0, 1fr) minmax(0, 1fr) auto;

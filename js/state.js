@@ -46,6 +46,7 @@ export const elements = {
 	amountInput: document.getElementById("amountInput"),
 	notesInput: document.getElementById("notesInput"),
 	receiptReviewPanel: document.getElementById("receiptReviewPanel"),
+	receiptReviewSummary: document.getElementById("receiptReviewSummary"),
 	receiptReviewFields: document.getElementById("receiptReviewFields"),
 	receiptReviewProducts: document.getElementById("receiptReviewProducts"),
 	receiptReviewDiscounts: document.getElementById("receiptReviewDiscounts"),

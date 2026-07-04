@@ -31,6 +31,7 @@ import { onScanReceipt } from "./ocr.js";
 import { extractPhoneFromText, parseTextForStore } from "./matcher.js";
 import { ReceiptIntelligenceService } from "./services/ReceiptIntelligenceService.js";
 import { buildReceiptReviewModel } from "./services/ReceiptReviewModelBuilder.js";
+import { buildReceiptReviewSummary } from "./services/ReceiptReviewSummary.js";
 import { NullProvider } from "./services/providers/NullProvider.js";
 import { elements, state } from "./state.js";
 import {
@@ -818,6 +819,7 @@ import {
     }
 
     clearElement(elements.receiptReviewFields);
+    renderReceiptReviewSummary(null);
     renderReviewSection(elements.receiptReviewProducts, "", null);
     renderReviewSection(elements.receiptReviewDiscounts, "", null);
     renderReviewSection(elements.receiptReviewLoyalty, "", null);
@@ -848,12 +850,52 @@ import {
       elements.receiptReviewFields.appendChild(createReviewFieldRow(label, fields[key]));
     }
 
+    renderReceiptReviewSummary(reviewModel);
     renderReviewSection(elements.receiptReviewProducts, "Products", reviewModel.products);
     renderReviewSection(elements.receiptReviewDiscounts, "Discounts", reviewModel.discounts);
     renderReviewSection(elements.receiptReviewLoyalty, "Loyalty", reviewModel.loyalty);
     renderReviewDebug(reviewModel);
     elements.receiptReviewPanel.hidden = false;
     updateLocalAIReviewControls();
+  }
+
+  function renderReceiptReviewSummary(reviewModel) {
+    if (!elements.receiptReviewSummary) {
+      return;
+    }
+
+    clearElement(elements.receiptReviewSummary);
+
+    if (!reviewModel || typeof reviewModel !== "object") {
+      elements.receiptReviewSummary.hidden = true;
+      return;
+    }
+
+    const summary = buildReceiptReviewSummary(reviewModel);
+    const title = document.createElement("h4");
+    title.textContent = "AI Review Summary";
+
+    const counts = document.createElement("div");
+    counts.className = "receipt-review-summary-counts";
+    counts.append(
+      createReviewSummaryCount("same", "✓", summary.same, "Same"),
+      createReviewSummaryCount("suggested", "💡", summary.suggested, "Suggested"),
+      createReviewSummaryCount("different", "⚠️", summary.different, "Different")
+    );
+
+    const message = document.createElement("p");
+    message.className = summary.hasConflicts ? "is-conflict" : "is-ok";
+    message.textContent = summary.message;
+
+    elements.receiptReviewSummary.append(title, counts, message);
+    elements.receiptReviewSummary.hidden = false;
+  }
+
+  function createReviewSummaryCount(status, icon, count, label) {
+    const item = document.createElement("span");
+    item.className = `receipt-review-summary-count is-${status}`;
+    item.textContent = `${icon} ${count} ${label}`;
+    return item;
   }
 
   function createReviewFieldRow(label, field) {
