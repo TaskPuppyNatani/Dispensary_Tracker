@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const { createLocalAISettings, resolveModelDirectory } = require("./local-ai/config.js");
 const { ModelManager } = require("./local-ai/ModelManager.js");
+const { LocalAIRuntimeManager } = require("./local-ai/LocalAIRuntimeManager.js");
 const { MainProcessReceiptVisionProvider } = require("./local-ai/ReceiptVisionProvider.js");
 const { OpenAICompatibleReceiptVisionProvider } = require("./local-ai/OpenAICompatibleReceiptVisionProvider.js");
 const { SmolVLMModelAdapter } = require("./local-ai/adapters/SmolVLMModelAdapter.js");
@@ -9,6 +10,7 @@ const { SmolVLMModelAdapter } = require("./local-ai/adapters/SmolVLMModelAdapter
 let modelManager = null;
 let receiptVisionProvider = null;
 let receiptVisionProviderType = "";
+let localAIRuntimeManager = null;
 
 const DEFAULT_RECEIPT_MODEL_DIRECTORY_NAME = "SmolVLM2-500M";
 const RECEIPT_PROVIDER_OPENAI_COMPATIBLE = "openai-compatible";
@@ -22,6 +24,27 @@ function getModelManager() {
   }
 
   return modelManager;
+}
+
+function getLocalAIRuntimeManager(options = {}) {
+  if (!localAIRuntimeManager) {
+    localAIRuntimeManager = new LocalAIRuntimeManager(options);
+  }
+
+  return localAIRuntimeManager;
+}
+
+function stopLocalAIRuntimeManager() {
+  if (!localAIRuntimeManager || !localAIRuntimeManager.isRunning()) {
+    return;
+  }
+
+  localAIRuntimeManager.stop().catch((error) => {
+    console.warn(
+      "Failed to stop Local AI runtime:",
+      error && error.message ? error.message : error
+    );
+  });
 }
 
 function getReceiptVisionProvider(localAISettings = createLocalAISettings()) {
@@ -248,6 +271,9 @@ function createWindow() {
 app.whenReady().then(() => {
   registerLocalAIHandlers();
   createWindow();
+
+  app.on("before-quit", stopLocalAIRuntimeManager);
+  app.on("will-quit", stopLocalAIRuntimeManager);
 
   // On macOS re-create the window when the dock icon is clicked and no
   // other windows are open.
