@@ -1,3 +1,5 @@
+import { ReceiptComparisonNormalizer } from "./ReceiptComparisonNormalizer.js";
+
 const LOCAL_AI_SOURCE = "local-ai";
 
 const FIELD_DEFINITIONS = [
@@ -72,7 +74,7 @@ export function buildReceiptReviewModel(analysisResult) {
       current,
       suggestion,
       source: hasPresentValue(suggestion) ? LOCAL_AI_SOURCE : null,
-      changed: valuesDiffer(current, suggestion),
+      changed: valuesDiffer(definition.key, current, suggestion),
     };
   }
 
@@ -120,20 +122,16 @@ function readNullableValue(source, key) {
   return source[key] === undefined ? null : source[key];
 }
 
-function valuesDiffer(current, suggestion) {
+function valuesDiffer(fieldKey, current, suggestion) {
   if (!hasPresentValue(current) || !hasPresentValue(suggestion)) {
     return false;
   }
 
-  return normalizeForComparison(current) !== normalizeForComparison(suggestion);
+  return ReceiptComparisonNormalizer.valuesDiffer(fieldKey, current, suggestion);
 }
 
 function hasPresentValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== "";
-}
-
-function normalizeForComparison(value) {
-  return String(value).trim();
 }
 
 function deepCopy(value) {

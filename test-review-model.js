@@ -153,6 +153,69 @@ async function run() {
     assert.strictEqual(model.fields.total.changed, true);
   });
 
+  test("comparison normalization for currency text date and time", function() {
+    const analysis = makeAnalysis({
+      trace: {
+        finalRendered: {
+          location: "Cash",
+          license: "LIC-123",
+          date: "May 14, 2026",
+          time: "13:28",
+          amount: 10,
+        },
+      },
+      advisory: {
+        ...makeAnalysis().advisory,
+        receipt: {
+          ...makeAnalysis().advisory.receipt,
+          dispensary: "cash",
+          purchaseDate: "2026-05-14",
+          purchaseTime: "1:28 PM",
+          total: "$10.00",
+        },
+      },
+    });
+    const model = buildReceiptReviewModel(analysis);
+
+    assert.deepStrictEqual(model.fields.dispensary, {
+      current: "Cash",
+      suggestion: "cash",
+      source: "local-ai",
+      changed: false,
+    });
+    assert.strictEqual(model.fields.total.current, 10);
+    assert.strictEqual(model.fields.total.suggestion, "$10.00");
+    assert.strictEqual(model.fields.total.changed, false);
+    assert.strictEqual(model.fields.purchaseDate.current, "May 14, 2026");
+    assert.strictEqual(model.fields.purchaseDate.suggestion, "2026-05-14");
+    assert.strictEqual(model.fields.purchaseDate.changed, false);
+    assert.strictEqual(model.fields.purchaseTime.current, "13:28");
+    assert.strictEqual(model.fields.purchaseTime.suggestion, "1:28 PM");
+    assert.strictEqual(model.fields.purchaseTime.changed, false);
+  });
+
+  test("truly different values still compare as different", function() {
+    const analysis = makeAnalysis({
+      trace: {
+        finalRendered: {
+          amount: 10,
+        },
+      },
+      advisory: {
+        ...makeAnalysis().advisory,
+        receipt: {
+          ...makeAnalysis().advisory.receipt,
+          total: 11,
+        },
+      },
+    });
+    const model = buildReceiptReviewModel(analysis);
+
+    assert.strictEqual(model.fields.total.current, 10);
+    assert.strictEqual(model.fields.total.suggestion, 11);
+    assert.strictEqual(model.fields.total.changed, true);
+  });
+
   test("advisory products discounts loyalty", function() {
     const model = buildReceiptReviewModel(makeAnalysis());
 
@@ -277,7 +340,7 @@ async function run() {
       "window.",
     ];
 
-    assert.strictEqual(source.includes("import "), false);
+    assert.strictEqual(source.includes("ReceiptComparisonNormalizer"), true);
     for (const term of forbidden) {
       assert.strictEqual(source.includes(term), false, `builder should not reference ${term}`);
     }
