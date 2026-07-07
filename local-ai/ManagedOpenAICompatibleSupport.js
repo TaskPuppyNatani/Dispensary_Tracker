@@ -3,6 +3,9 @@
 const {
   inspectGGUFVisionModel,
 } = require("./GGUFVisionModelManifest.js");
+const {
+  resolveManagedRuntimeExecutablePath,
+} = require("./LocalAIRuntimePaths.js");
 
 const PROVIDER_MODE_EXTERNAL_OPENAI_COMPATIBLE = "external-openai-compatible";
 const PROVIDER_MODE_MANAGED_OPENAI_COMPATIBLE = "managed-openai-compatible";
@@ -25,10 +28,20 @@ function buildOpenAICompatibleProviderOptions(localAISettings = {}, overrides = 
   };
 }
 
-function readManagedRuntimeEnvironment(env = process.env) {
+function readManagedRuntimeEnvironment(env = process.env, options = {}) {
+  const executableResolution = resolveManagedRuntimeExecutablePath({
+    env,
+    app: options.app,
+    process: options.process,
+    path: options.path,
+    baseDirectory: options.baseDirectory,
+  });
+
   return {
     providerMode: resolveLocalAIProviderMode(env),
-    executablePath: readString(env.LOCAL_AI_LLAMA_SERVER_PATH),
+    executablePath: executableResolution.found ? executableResolution.executablePath : "",
+    executableSource: executableResolution.source,
+    executableReason: executableResolution.reason,
     modelDirectory: readString(env.LOCAL_AI_MODEL_DIR),
     ctxSize: readOptionalPositiveInteger(env.LOCAL_AI_CTX_SIZE, "LOCAL_AI_CTX_SIZE"),
     gpuLayers: readOptionalNonNegativeInteger(env.LOCAL_AI_GPU_LAYERS, "LOCAL_AI_GPU_LAYERS"),
@@ -41,7 +54,7 @@ function readManagedRuntimeEnvironment(env = process.env) {
 
 function buildManagedRuntimeOptions({ envConfig = {}, inspection = {} } = {}) {
   if (!readString(envConfig.executablePath)) {
-    throw new Error("LOCAL_AI_LLAMA_SERVER_PATH is required for managed-openai-compatible mode.");
+    throw new Error(envConfig.executableReason || "No managed llama-server executable path could be resolved.");
   }
 
   if (!inspection || inspection.supported !== true) {
@@ -75,12 +88,21 @@ async function ensureManagedOpenAICompatibleRuntime({
   localAISettings = {},
   runtimeManager,
   inspectModel = inspectGGUFVisionModel,
+  app,
+  process: processObject,
+  path: pathObject,
+  baseDirectory,
 } = {}) {
   if (!runtimeManager || typeof runtimeManager.start !== "function" || typeof runtimeManager.getStatus !== "function") {
     throw new Error("A runtimeManager with start() and getStatus() is required.");
   }
 
-  const envConfig = readManagedRuntimeEnvironment(env);
+  const envConfig = readManagedRuntimeEnvironment(env, {
+    app,
+    process: processObject,
+    path: pathObject,
+    baseDirectory,
+  });
   if (!envConfig.modelDirectory) {
     return createManagedResult({
       available: false,

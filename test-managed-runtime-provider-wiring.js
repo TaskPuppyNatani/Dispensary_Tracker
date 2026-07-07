@@ -136,7 +136,14 @@ async function run() {
       LOCAL_AI_GPU_LAYERS: "20",
       LOCAL_AI_STARTUP_TIMEOUT_MS: "45000",
     };
-    const envConfig = readManagedRuntimeEnvironment(env);
+    const envConfig = readManagedRuntimeEnvironment(env, {
+      app: { isPackaged: false },
+      process: {
+        platform: "win32",
+        arch: "x64",
+      },
+      baseDirectory: "C:/repo",
+    });
     const inspection = makeInspection();
     const runtimeOptions = buildManagedRuntimeOptions({ envConfig, inspection });
 
@@ -148,6 +155,8 @@ async function run() {
       gpuLayers: 20,
       startupTimeoutMs: 45000,
     });
+    assert.strictEqual(envConfig.executableSource, "env");
+    assert.strictEqual(envConfig.executableReason, null);
   });
 
   await test("managed mode uses runtime endpoint for provider options", async function() {
@@ -161,6 +170,12 @@ async function run() {
       localAISettings: makeSettings(),
       runtimeManager,
       inspectModel: async () => makeInspection(),
+      app: { isPackaged: false },
+      process: {
+        platform: "win32",
+        arch: "x64",
+      },
+      baseDirectory: "C:/repo",
     });
 
     assert.strictEqual(result.available, true);
@@ -184,6 +199,12 @@ async function run() {
         supported: false,
         errors: ["Manifest invalid."],
       }),
+      app: { isPackaged: false },
+      process: {
+        platform: "win32",
+        arch: "x64",
+      },
+      baseDirectory: "C:/repo",
     });
 
     assert.strictEqual(result.available, false);
@@ -215,6 +236,12 @@ async function run() {
       localAISettings: makeSettings(),
       runtimeManager,
       inspectModel: async () => makeInspection(),
+      app: { isPackaged: false },
+      process: {
+        platform: "win32",
+        arch: "x64",
+      },
+      baseDirectory: "C:/repo",
     });
 
     assert.strictEqual(result.available, false);
@@ -246,12 +273,77 @@ async function run() {
       localAISettings: makeSettings(),
       runtimeManager,
       inspectModel: async () => makeInspection(),
+      app: { isPackaged: false },
+      process: {
+        platform: "win32",
+        arch: "x64",
+      },
+      baseDirectory: "C:/repo",
     });
 
     assert.strictEqual(result.available, true);
     assert.strictEqual(calls.restart.length, 1);
     assert.strictEqual(calls.start.length, 0);
     assert.strictEqual(result.providerOptions.baseUrl, "http://127.0.0.1:34568/v1/chat/completions");
+  });
+
+  await test("packaged runtime path is used when env override is absent", async function() {
+    const { runtimeManager, calls } = createRuntimeManager();
+    const result = await ensureManagedOpenAICompatibleRuntime({
+      env: {
+        LOCAL_AI_PROVIDER_MODE: PROVIDER_MODE_MANAGED_OPENAI_COMPATIBLE,
+        LOCAL_AI_MODEL_DIR: "C:/models/qwen",
+      },
+      localAISettings: makeSettings(),
+      runtimeManager,
+      inspectModel: async () => makeInspection(),
+      app: { isPackaged: true },
+      process: {
+        platform: "win32",
+        arch: "x64",
+        resourcesPath: "C:/Program Files/Dispensary Tracker/resources",
+      },
+      baseDirectory: "C:/repo",
+    });
+
+    assert.strictEqual(result.available, true);
+    assert.strictEqual(calls.start.length, 1);
+    assert.strictEqual(
+      calls.start[0].executablePath,
+      path.resolve(
+        "C:/Program Files/Dispensary Tracker/resources",
+        "local-ai-runtime",
+        "win32",
+        "x64",
+        "llama-server.exe"
+      )
+    );
+    assert.strictEqual(result.envConfig.executableSource, "packaged");
+  });
+
+  await test("missing executable resolution leaves AI unavailable without crashing", async function() {
+    const { runtimeManager, calls } = createRuntimeManager();
+    const result = await ensureManagedOpenAICompatibleRuntime({
+      env: {
+        LOCAL_AI_PROVIDER_MODE: PROVIDER_MODE_MANAGED_OPENAI_COMPATIBLE,
+        LOCAL_AI_MODEL_DIR: "C:/models/qwen",
+      },
+      localAISettings: makeSettings(),
+      runtimeManager,
+      inspectModel: async () => makeInspection(),
+      app: { isPackaged: true },
+      process: {
+        platform: "linux",
+        arch: "x64",
+        resourcesPath: "",
+      },
+      baseDirectory: "C:/repo",
+    });
+
+    assert.strictEqual(result.available, false);
+    assert.strictEqual(result.reason, "process.resourcesPath is unavailable.");
+    assert.strictEqual(calls.start.length, 0);
+    assert.strictEqual(result.envConfig.executableSource, "packaged");
   });
 
   await test("app shutdown helper stops managed runtime only when running", async function() {

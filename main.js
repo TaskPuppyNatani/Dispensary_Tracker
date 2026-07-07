@@ -103,6 +103,10 @@ async function ensureManagedOpenAICompatibleState(localAISettings = createLocalA
     localAISettings,
     runtimeManager: getLocalAIRuntimeManager(),
     inspectModel: inspectGGUFVisionModel,
+    app,
+    process,
+    path,
+    baseDirectory: __dirname,
   });
 }
 
