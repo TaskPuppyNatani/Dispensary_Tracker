@@ -1,7 +1,16 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const { createLocalAISettings, resolveModelDirectory } = require("./local-ai/config.js");
+const {
+  PROVIDER_MODE_EXTERNAL_OPENAI_COMPATIBLE,
+  PROVIDER_MODE_MANAGED_OPENAI_COMPATIBLE,
+  resolveLocalAIProviderMode,
+  buildOpenAICompatibleProviderOptions,
+  ensureManagedOpenAICompatibleRuntime,
+  stopManagedRuntime,
+} = require("./local-ai/ManagedOpenAICompatibleSupport.js");
 const { ModelManager } = require("./local-ai/ModelManager.js");
+const { inspectGGUFVisionModel } = require("./local-ai/GGUFVisionModelManifest.js");
 const { LocalAIRuntimeManager } = require("./local-ai/LocalAIRuntimeManager.js");
 const { MainProcessReceiptVisionProvider } = require("./local-ai/ReceiptVisionProvider.js");
 const { OpenAICompatibleReceiptVisionProvider } = require("./local-ai/OpenAICompatibleReceiptVisionProvider.js");
@@ -35,11 +44,7 @@ function getLocalAIRuntimeManager(options = {}) {
 }
 
 function stopLocalAIRuntimeManager() {
-  if (!localAIRuntimeManager || !localAIRuntimeManager.isRunning()) {
-    return;
-  }
-
-  localAIRuntimeManager.stop().catch((error) => {
+  stopManagedRuntime(localAIRuntimeManager).catch((error) => {
     console.warn(
       "Failed to stop Local AI runtime:",
       error && error.message ? error.message : error
@@ -49,12 +54,16 @@ function stopLocalAIRuntimeManager() {
 
 function getReceiptVisionProvider(localAISettings = createLocalAISettings()) {
   const providerType = getConfiguredReceiptProviderType(localAISettings);
+  const providerMode = providerType === RECEIPT_PROVIDER_OPENAI_COMPATIBLE
+    ? resolveLocalAIProviderMode(process.env)
+    : providerType;
+  const providerKey = `${providerType}:${providerMode}`;
 
-  if (!receiptVisionProvider || receiptVisionProviderType !== providerType) {
+  if (!receiptVisionProvider || receiptVisionProviderType !== providerKey) {
     receiptVisionProvider = providerType === RECEIPT_PROVIDER_OPENAI_COMPATIBLE
       ? new OpenAICompatibleReceiptVisionProvider(createOpenAICompatibleProviderOptions(localAISettings))
       : new MainProcessReceiptVisionProvider();
-    receiptVisionProviderType = providerType;
+    receiptVisionProviderType = providerKey;
   }
 
   return receiptVisionProvider;
@@ -68,13 +77,7 @@ function getConfiguredReceiptProviderType(localAISettings = createLocalAISetting
 }
 
 function createOpenAICompatibleProviderOptions(localAISettings = createLocalAISettings()) {
-  return {
-    baseUrl: localAISettings.openAICompatibleBaseUrl,
-    model: localAISettings.openAICompatibleModel,
-    timeoutMs: localAISettings.openAICompatibleTimeoutMs,
-    temperature: localAISettings.openAICompatibleTemperature,
-    defaultMaxNewTokens: localAISettings.openAICompatibleMaxNewTokens,
-  };
+  return buildOpenAICompatibleProviderOptions(localAISettings);
 }
 
 function resolveConfiguredReceiptModelPath() {
@@ -94,9 +97,51 @@ async function inspectConfiguredReceiptModel() {
   return await adapter.inspectModel(modelPath);
 }
 
+async function ensureManagedOpenAICompatibleState(localAISettings = createLocalAISettings()) {
+  return await ensureManagedOpenAICompatibleRuntime({
+    env: process.env,
+    localAISettings,
+    runtimeManager: getLocalAIRuntimeManager(),
+    inspectModel: inspectGGUFVisionModel,
+  });
+}
+
 async function getReceiptReviewStatus() {
   const localAISettings = createLocalAISettings();
   const providerType = getConfiguredReceiptProviderType(localAISettings);
+  const providerMode = providerType === RECEIPT_PROVIDER_OPENAI_COMPATIBLE
+    ? resolveLocalAIProviderMode(process.env)
+    : null;
+
+  if (
+    providerType === RECEIPT_PROVIDER_OPENAI_COMPATIBLE
+    && providerMode === PROVIDER_MODE_MANAGED_OPENAI_COMPATIBLE
+  ) {
+    const managed = await ensureManagedOpenAICompatibleState(localAISettings);
+    const provider = getReceiptVisionProvider(localAISettings);
+    const providerStatus = provider.initialized ? provider.getStatus() : null;
+
+    return {
+      available: Boolean(managed.available),
+      initialized: Boolean(provider.initialized && managed.available),
+      modelId: managed.inspection && managed.inspection.modelId ? managed.inspection.modelId : "",
+      displayName: managed.inspection && managed.inspection.displayName ? managed.inspection.displayName : "",
+      providerType,
+      providerMode,
+      backend: "managed-openai-compatible",
+      endpointUrl: managed.runtimeStatus && managed.runtimeStatus.chatCompletionsUrl
+        ? managed.runtimeStatus.chatCompletionsUrl
+        : "",
+      reason: managed.available ? null : managed.reason || "managed_openai_compatible_provider_unavailable",
+      missingFiles: [],
+      warnings: Array.isArray(managed.warnings) ? managed.warnings : [],
+      managedRuntimeStatus: managed.runtimeStatus,
+      runtimeLogs: managed.runtimeStatus && Array.isArray(managed.runtimeStatus.logs)
+        ? managed.runtimeStatus.logs
+        : [],
+      healthStatus: providerStatus && providerStatus.healthStatus ? providerStatus.healthStatus : null,
+    };
+  }
 
   if (receiptVisionProvider && receiptVisionProvider.initialized) {
     const status = receiptVisionProvider.getStatus();
@@ -104,13 +149,18 @@ async function getReceiptReviewStatus() {
       available: true,
       initialized: true,
       modelId: status.modelId || "",
+      displayName: "",
       providerType,
+      providerMode: providerMode || PROVIDER_MODE_EXTERNAL_OPENAI_COMPATIBLE,
       backend: status.backend || providerType,
+      endpointUrl: status.baseUrl || "",
       reason: null,
       missingFiles: [],
       warnings: status.healthStatus && Array.isArray(status.healthStatus.warnings)
         ? status.healthStatus.warnings
         : [],
+      managedRuntimeStatus: null,
+      runtimeLogs: [],
     };
   }
 
@@ -122,22 +172,32 @@ async function getReceiptReviewStatus() {
         available: Boolean(health.available),
         initialized: false,
         modelId: health.modelId || "",
+        displayName: "",
         providerType,
+        providerMode: PROVIDER_MODE_EXTERNAL_OPENAI_COMPATIBLE,
         backend: health.backend || "openai-compatible",
+        endpointUrl: health.baseUrl || "",
         reason: health.available ? null : health.reason || "openai_compatible_provider_unavailable",
         missingFiles: [],
         warnings: Array.isArray(health.warnings) ? health.warnings : [],
+        managedRuntimeStatus: null,
+        runtimeLogs: [],
       };
     } catch (error) {
       return {
         available: false,
         initialized: false,
         modelId: "",
+        displayName: "",
         providerType,
+        providerMode: PROVIDER_MODE_EXTERNAL_OPENAI_COMPATIBLE,
         backend: "openai-compatible",
+        endpointUrl: "",
         reason: error && error.message ? error.message : String(error),
         missingFiles: [],
         warnings: [],
+        managedRuntimeStatus: null,
+        runtimeLogs: [],
       };
     }
   }
@@ -148,22 +208,32 @@ async function getReceiptReviewStatus() {
       available: Boolean(inspection.supported),
       initialized: false,
       modelId: inspection.modelId || "",
+      displayName: "",
       providerType,
+      providerMode: null,
       backend: "onnx",
+      endpointUrl: "",
       reason: inspection.supported ? null : "configured_model_unavailable",
       missingFiles: Array.isArray(inspection.missingFiles) ? inspection.missingFiles : [],
       warnings: Array.isArray(inspection.warnings) ? inspection.warnings : [],
+      managedRuntimeStatus: null,
+      runtimeLogs: [],
     };
   } catch (error) {
     return {
       available: false,
       initialized: false,
       modelId: "",
+      displayName: "",
       providerType,
+      providerMode: null,
       backend: "onnx",
+      endpointUrl: "",
       reason: error && error.message ? error.message : String(error),
       missingFiles: [],
       warnings: [],
+      managedRuntimeStatus: null,
+      runtimeLogs: [],
     };
   }
 }
@@ -230,12 +300,21 @@ function registerLocalAIHandlers() {
     const localAISettings = createLocalAISettings();
     const providerType = getConfiguredReceiptProviderType(localAISettings);
     const provider = getReceiptVisionProvider(localAISettings);
-    if (!provider.initialized) {
-      if (providerType === RECEIPT_PROVIDER_OPENAI_COMPATIBLE) {
-        await provider.initialize(createOpenAICompatibleProviderOptions(localAISettings));
-      } else {
-        await provider.initialize({ modelPath: resolveConfiguredReceiptModelPath() });
+    if (
+      providerType === RECEIPT_PROVIDER_OPENAI_COMPATIBLE
+      && resolveLocalAIProviderMode(process.env) === PROVIDER_MODE_MANAGED_OPENAI_COMPATIBLE
+    ) {
+      const managed = await ensureManagedOpenAICompatibleState(localAISettings);
+      if (!managed.available || !managed.providerOptions) {
+        throw new Error(managed.reason || "Managed Local AI runtime is unavailable.");
       }
+      await provider.initialize(managed.providerOptions);
+    } else if (providerType === RECEIPT_PROVIDER_OPENAI_COMPATIBLE) {
+      if (!provider.initialized) {
+        await provider.initialize(createOpenAICompatibleProviderOptions(localAISettings));
+      }
+    } else if (!provider.initialized) {
+      await provider.initialize({ modelPath: resolveConfiguredReceiptModelPath() });
     }
 
     return await provider.analyzeReceipt(readReceiptAnalysisPayload(payload));
