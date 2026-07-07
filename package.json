@@ -21,6 +21,20 @@
     "directories": {
       "output": "dist"
     },
+    "extraResources": [
+      {
+        "from": "resources/local-ai-runtime/win32/x64",
+        "to": "local-ai-runtime/win32/x64"
+      },
+      {
+        "from": "resources/local-ai-runtime/darwin/universal",
+        "to": "local-ai-runtime/darwin/universal"
+      },
+      {
+        "from": "resources/local-ai-runtime/linux/x64",
+        "to": "local-ai-runtime/linux/x64"
+      }
+    ],
     "files": [
       "**/*",
       "!dist/**",
