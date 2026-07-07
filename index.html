@@ -121,6 +121,22 @@
             <pre id="receiptReviewDebugText"></pre>
           </details>
         </section>
+
+        <section id="localAIStatusPanel" class="receipt-review" hidden aria-live="polite">
+          <div class="receipt-review-head">
+            <div>
+              <h3>Local AI</h3>
+              <p class="hint">Read-only diagnostics for the current Local AI runtime.</p>
+            </div>
+          </div>
+          <div id="localAIStatusFields" class="local-ai-status-grid"></div>
+          <div id="localAIStatusReason" class="local-ai-status-section" hidden></div>
+          <div id="localAIStatusWarnings" class="local-ai-status-section" hidden></div>
+          <details id="localAIStatusLogs" class="local-ai-status-section" hidden>
+            <summary>Recent Runtime Logs</summary>
+            <pre id="localAIStatusLogsText"></pre>
+          </details>
+        </section>
       </section>
 
       <section class="card reveal-up" style="--delay: 0.3s;">

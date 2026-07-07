@@ -34,6 +34,7 @@ import {
   buildReceiptDiscountDisplay,
   buildReceiptLoyaltyDisplay,
 } from "./services/ReceiptEnrichmentDisplay.js";
+import { buildLocalAIStatusDisplay } from "./services/LocalAIStatusDisplay.js";
 import { buildReceiptReviewModel } from "./services/ReceiptReviewModelBuilder.js";
 import { buildReceiptReviewSummary } from "./services/ReceiptReviewSummary.js";
 import { buildReceiptProductDisplay } from "./services/ReceiptProductDisplay.js";
@@ -90,6 +91,7 @@ import {
         available: false,
         reason: error && error.message ? error.message : String(error),
       };
+      renderLocalAIStatusPanel(state.localAIReviewStatus);
       updateLocalAIReviewControls("Local AI unavailable");
     });
     ensureDispensaryLookupLoaded().catch((error) => {
@@ -865,6 +867,82 @@ import {
     updateLocalAIReviewControls();
   }
 
+  function renderLocalAIStatusPanel(statusPayload = state.localAIReviewStatus) {
+    if (
+      !elements.localAIStatusPanel
+      || !elements.localAIStatusFields
+      || !elements.localAIStatusReason
+      || !elements.localAIStatusWarnings
+      || !elements.localAIStatusLogs
+      || !elements.localAIStatusLogsText
+    ) {
+      return;
+    }
+
+    clearElement(elements.localAIStatusFields);
+    clearElement(elements.localAIStatusReason);
+    clearElement(elements.localAIStatusWarnings);
+    elements.localAIStatusLogsText.textContent = "";
+    elements.localAIStatusReason.hidden = true;
+    elements.localAIStatusWarnings.hidden = true;
+    elements.localAIStatusLogs.hidden = true;
+
+    if (!statusPayload || typeof statusPayload !== "object") {
+      elements.localAIStatusPanel.hidden = true;
+      return;
+    }
+
+    const display = buildLocalAIStatusDisplay(statusPayload);
+    for (const row of display.rows) {
+      elements.localAIStatusFields.appendChild(createLocalAIStatusItem(row.label, row.value));
+    }
+
+    if (display.showReason) {
+      const heading = document.createElement("h4");
+      heading.textContent = "Reason";
+      const body = document.createElement("p");
+      body.textContent = display.reason;
+      elements.localAIStatusReason.append(heading, body);
+      elements.localAIStatusReason.hidden = false;
+    }
+
+    if (display.showWarnings) {
+      const heading = document.createElement("h4");
+      heading.textContent = "Warnings";
+      const list = document.createElement("ul");
+
+      for (const warning of display.warnings) {
+        const item = document.createElement("li");
+        item.textContent = warning;
+        list.appendChild(item);
+      }
+
+      elements.localAIStatusWarnings.append(heading, list);
+      elements.localAIStatusWarnings.hidden = false;
+    }
+
+    if (display.showLogs) {
+      elements.localAIStatusLogsText.textContent = display.recentLogs.join("\n");
+      elements.localAIStatusLogs.hidden = false;
+    }
+
+    elements.localAIStatusPanel.hidden = false;
+  }
+
+  function createLocalAIStatusItem(label, value) {
+    const item = document.createElement("div");
+    item.className = "local-ai-status-item";
+
+    const labelEl = document.createElement("span");
+    labelEl.textContent = label;
+
+    const valueEl = document.createElement("strong");
+    valueEl.textContent = value;
+
+    item.append(labelEl, valueEl);
+    return item;
+  }
+
   function renderReceiptReviewSummary(reviewModel) {
     if (!elements.receiptReviewSummary) {
       return;
@@ -1177,6 +1255,7 @@ import {
         available: false,
         reason: "Local AI bridge unavailable",
       };
+      renderLocalAIStatusPanel(state.localAIReviewStatus);
       updateLocalAIReviewControls("Local AI unavailable");
       return state.localAIReviewStatus;
     }
@@ -1195,6 +1274,7 @@ import {
       };
     }
 
+    renderLocalAIStatusPanel(state.localAIReviewStatus);
     updateLocalAIReviewControls();
     return state.localAIReviewStatus;
   }

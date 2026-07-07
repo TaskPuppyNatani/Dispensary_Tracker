@@ -567,6 +567,78 @@ textarea {
   font-weight: 700;
 }
 
+.local-ai-status-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.55rem;
+}
+
+.local-ai-status-item {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.55rem;
+  background: color-mix(in srgb, var(--surface) 88%, black 8%);
+}
+
+.local-ai-status-item span {
+  display: block;
+  margin: 0 0 0.12rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.local-ai-status-item strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.local-ai-status-section {
+  margin-top: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem;
+  background: color-mix(in srgb, var(--surface) 90%, black 7%);
+}
+
+.local-ai-status-section h4 {
+  margin: 0 0 0.45rem;
+  font-size: 0.86rem;
+}
+
+.local-ai-status-section p,
+.local-ai-status-section li {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.local-ai-status-section ul {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.local-ai-status-section pre {
+  margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font: 0.78rem/1.45 "JetBrains Mono", monospace;
+}
+
+.local-ai-status-section summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 .history-head {
   display: flex;
   align-items: baseline;
