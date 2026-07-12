@@ -16,3 +16,4 @@ docs/test-receipts/*.png
 models/**/*.gguf
 models/**/*.bin
 models/**/mmproj*models/ 
+models/ 
