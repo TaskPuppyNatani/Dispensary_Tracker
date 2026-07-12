@@ -90,6 +90,58 @@ async function run() {
     assert.strictEqual(display.showLogs, false);
   });
 
+  test("automatic managed selection diagnostics are displayed", function() {
+    const display = buildLocalAIStatusDisplay({
+      available: true,
+      providerMode: "managed-openai-compatible",
+      backend: "managed-openai-compatible",
+      providerSelection: {
+        requestedMode: null,
+        resolvedMode: "managed-openai-compatible",
+        selectionSource: "single-managed-model",
+        reasonCode: "single-managed-model",
+        reason: "One valid managed GGUF vision model was discovered with a valid runtime.",
+        selectedModel: { modelId: "qwen-vl", displayName: "Qwen VL", modelDirectory: "C:/models/qwen" },
+        validModelCandidateCount: 1,
+        invalidCandidates: [],
+        warnings: [],
+      },
+    });
+
+    assert.ok(display.rows.some((row) => row.label === "Selection" && row.value === "Automatic managed model"));
+    assert.ok(display.rows.some((row) => row.label === "Model Candidates" && row.value === "1 valid; 0 ignored"));
+    assert.ok(display.rows.some((row) => row.label === "Selected Model" && row.value === "Qwen VL"));
+  });
+
+  test("external fallback selection reason is displayed without breaking external status", function() {
+    const display = buildLocalAIStatusDisplay({
+      available: true,
+      providerMode: "external-openai-compatible",
+      backend: "openai-compatible",
+      providerSelection: {
+        requestedMode: null,
+        resolvedMode: "external-openai-compatible",
+        selectionSource: "external-fallback",
+        reasonCode: "multiple-managed-models",
+        reason: "Multiple valid managed GGUF vision models were discovered; automatic selection is ambiguous.",
+        selectedModel: null,
+        validModelCandidateCount: 2,
+        invalidCandidates: [{ modelDirectory: "C:/models/bad", errors: ["invalid"] }],
+        warnings: ["invalid model ignored"],
+      },
+    });
+
+    assert.strictEqual(display.rows[0].value, "External LM Studio");
+    assert.ok(display.rows.some((row) => row.label === "Selection" && row.value === "External fallback"));
+    assert.ok(display.rows.some((row) => row.label === "Selection Reason" && row.value.includes("ambiguous")));
+    assert.ok(display.warnings.includes("Selection: invalid model ignored"));
+  });
+
+  test("missing provider selection preserves legacy display rows", function() {
+    const display = buildLocalAIStatusDisplay({ available: false, backend: "openai-compatible" });
+    assert.strictEqual(display.rows.some((row) => row.label === "Selection"), false);
+  });
+
   test("startup failure is reported as failed", function() {
     const display = buildLocalAIStatusDisplay({
       available: false,

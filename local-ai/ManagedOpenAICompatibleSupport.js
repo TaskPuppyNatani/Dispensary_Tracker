@@ -45,7 +45,7 @@ function readManagedRuntimeEnvironment(env = process.env, options = {}) {
     executablePath: executableResolution.found ? executableResolution.executablePath : "",
     executableSource: executableResolution.source,
     executableReason: executableResolution.reason,
-    modelDirectory: readString(env.LOCAL_AI_MODEL_DIR),
+    modelDirectory: readString(options.modelDirectory) || readString(env.LOCAL_AI_MODEL_DIR),
     ctxSize: readOptionalPositiveInteger(env.LOCAL_AI_CTX_SIZE, "LOCAL_AI_CTX_SIZE"),
     gpuLayers: readOptionalNonNegativeInteger(env.LOCAL_AI_GPU_LAYERS, "LOCAL_AI_GPU_LAYERS"),
     startupTimeoutMs: readOptionalPositiveInteger(
@@ -98,6 +98,7 @@ async function ensureManagedOpenAICompatibleRuntime({
   process: processObject,
   path: pathObject,
   baseDirectory,
+  modelDirectory,
 } = {}) {
   if (!runtimeManager || typeof runtimeManager.start !== "function" || typeof runtimeManager.getStatus !== "function") {
     throw new Error("A runtimeManager with start() and getStatus() is required.");
@@ -108,6 +109,7 @@ async function ensureManagedOpenAICompatibleRuntime({
     process: processObject,
     path: pathObject,
     baseDirectory,
+    modelDirectory,
   });
   if (!envConfig.modelDirectory) {
     return createManagedResult({

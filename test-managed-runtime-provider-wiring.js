@@ -174,6 +174,22 @@ async function run() {
     assert.strictEqual(envConfig.executableReason, null);
   });
 
+  await test("selected model directory overrides environment only for the managed startup invocation", async function() {
+    const env = {
+      LOCAL_AI_LLAMA_SERVER_PATH: "C:/tools/llama-server.exe",
+      LOCAL_AI_MODEL_DIR: "C:/models/from-environment",
+    };
+    const envConfig = readManagedRuntimeEnvironment(env, {
+      modelDirectory: "C:/models/selected-by-resolver",
+      app: { isPackaged: false },
+      process: { platform: "win32", arch: "x64" },
+      baseDirectory: "C:/repo",
+    });
+
+    assert.strictEqual(envConfig.modelDirectory, "C:/models/selected-by-resolver");
+    assert.strictEqual(env.LOCAL_AI_MODEL_DIR, "C:/models/from-environment");
+  });
+
   await test("managed mode uses runtime endpoint for provider options", async function() {
     const { runtimeManager, calls } = createRuntimeManager();
     const result = await ensureManagedOpenAICompatibleRuntime({

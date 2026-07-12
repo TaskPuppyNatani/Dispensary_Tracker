@@ -6,9 +6,11 @@ export function buildLocalAIStatusDisplay(statusPayload = {}) {
     ? normalized.managedRuntimeStatus
     : null;
   const health = readHealth(normalized, managedRuntimeStatus);
+  const providerSelection = readProviderSelection(normalized.providerSelection);
   const rows = [];
 
   pushRow(rows, "Provider Mode", formatProviderMode(normalized));
+  pushSelectionRows(rows, providerSelection);
   pushRow(rows, "Status", formatStatus(normalized, managedRuntimeStatus));
   pushRow(rows, "Runtime", formatRuntime(normalized, managedRuntimeStatus));
   pushRow(rows, "Model", readString(normalized.displayName) || readString(normalized.modelId));
@@ -24,6 +26,9 @@ export function buildLocalAIStatusDisplay(statusPayload = {}) {
   const warnings = Array.isArray(normalized.warnings)
     ? normalized.warnings.map((warning) => readString(warning)).filter(Boolean)
     : [];
+  if (providerSelection) {
+    warnings.push(...providerSelection.warnings.map((warning) => `Selection: ${warning}`));
+  }
   const recentLogs = readRecentLogs(Array.isArray(normalized.runtimeLogs) ? normalized.runtimeLogs : []);
 
   return {
@@ -34,6 +39,62 @@ export function buildLocalAIStatusDisplay(statusPayload = {}) {
     showReason: Boolean(reason),
     showWarnings: warnings.length > 0,
     showLogs: recentLogs.length > 0,
+  };
+}
+
+function pushSelectionRows(rows, selection) {
+  if (!selection) {
+    return;
+  }
+
+  pushRow(rows, "Selection", formatSelectionSource(selection.selectionSource));
+  if (selection.requestedMode) {
+    pushRow(rows, "Requested Mode", formatProviderMode({ providerMode: selection.requestedMode }));
+  }
+  if (selection.reason) {
+    pushRow(rows, "Selection Reason", selection.reason);
+  }
+  if (selection.validModelCandidateCount !== null) {
+    const ignoredCount = selection.invalidCandidates.length;
+    pushRow(rows, "Model Candidates", `${selection.validModelCandidateCount} valid; ${ignoredCount} ignored`);
+  }
+  if (selection.selectedModel && selection.selectedModel.displayName) {
+    pushRow(rows, "Selected Model", selection.selectedModel.displayName);
+  }
+}
+
+function formatSelectionSource(source) {
+  const labels = {
+    "explicit-external-mode": "Explicit external mode",
+    "explicit-managed-mode": "Explicit managed mode",
+    "explicit-model-directory": "Explicit model directory",
+    "single-managed-model": "Automatic managed model",
+    "external-fallback": "External fallback",
+    "invalid-provider-mode": "Invalid provider-mode override",
+  };
+  return labels[source] || source || "Unknown";
+}
+
+function readProviderSelection(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  const invalidCandidates = Array.isArray(value.invalidCandidates) ? value.invalidCandidates : [];
+  return {
+    requestedMode: readString(value.requestedMode),
+    resolvedMode: readString(value.resolvedMode),
+    selectionSource: readString(value.selectionSource),
+    reasonCode: readString(value.reasonCode),
+    reason: readString(value.reason),
+    selectedModel: value.selectedModel && typeof value.selectedModel === "object" ? {
+      modelId: readString(value.selectedModel.modelId),
+      displayName: readString(value.selectedModel.displayName),
+    } : null,
+    validModelCandidateCount: Number.isSafeInteger(value.validModelCandidateCount)
+      ? value.validModelCandidateCount
+      : null,
+    invalidCandidates,
+    warnings: Array.isArray(value.warnings) ? value.warnings.map(readString).filter(Boolean) : [],
   };
 }
 
