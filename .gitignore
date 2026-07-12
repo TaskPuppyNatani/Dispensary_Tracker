@@ -3,3 +3,16 @@ dist/
 models/resources/local-ai-runtime/win32/x64/*
 !resources/local-ai-runtime/win32/x64/.gitkeep
 docs/test-receipts/*.jpg
+# Local AI runtime
+resources/local-ai-runtime/**/*
+!resources/local-ai-runtime/**/.gitkeep
+
+# Local test receipts
+docs/test-receipts/*.jpg
+docs/test-receipts/*.jpeg
+docs/test-receipts/*.png
+
+# Local AI models
+models/**/*.gguf
+models/**/*.bin
+models/**/mmproj*
