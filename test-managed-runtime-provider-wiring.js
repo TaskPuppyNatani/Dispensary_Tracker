@@ -35,6 +35,7 @@ function makeInspection(overrides = {}) {
     contextSize: 16384,
     recommendedMaxTokens: 2048,
     capabilities: ["vision", "chat", "receipt-extraction"],
+    runtimeArgs: [],
     warnings: [],
     errors: [],
     ...overrides,
@@ -166,6 +167,7 @@ async function run() {
       ctxSize: 32768,
       gpuLayers: 20,
       startupTimeoutMs: 45000,
+      extraArgs: [],
     });
     assert.strictEqual(envConfig.executableSource, "env");
     assert.strictEqual(envConfig.executableReason, null);
@@ -301,6 +303,45 @@ async function run() {
     assert.strictEqual(calls.restart.length, 1);
     assert.strictEqual(calls.start.length, 0);
     assert.strictEqual(result.providerOptions.baseUrl, "http://127.0.0.1:34568/v1/chat/completions");
+  });
+
+  await test("manifest runtime arguments are forwarded and trigger a restart when changed", async function() {
+    const { runtimeManager, calls, state } = createRuntimeManager();
+    state.status = {
+      running: true,
+      ready: true,
+      executablePath: "C:/tools/llama-server.exe",
+      modelPath: "C:/models/qwen/model.gguf",
+      mmprojPath: "C:/models/qwen/mmproj.gguf",
+      ctxSize: 16384,
+      gpuLayers: null,
+      extraArgs: [],
+      chatCompletionsUrl: "http://127.0.0.1:34560/v1/chat/completions",
+      logs: [],
+      lastError: null,
+    };
+
+    const result = await ensureManagedOpenAICompatibleRuntime({
+      env: {
+        LOCAL_AI_PROVIDER_MODE: PROVIDER_MODE_MANAGED_OPENAI_COMPATIBLE,
+        LOCAL_AI_LLAMA_SERVER_PATH: "C:/tools/llama-server.exe",
+        LOCAL_AI_MODEL_DIR: "C:/models/qwen",
+      },
+      localAISettings: makeSettings(),
+      runtimeManager,
+      inspectModel: async () => makeInspection({ runtimeArgs: ["--image-min-tokens", "1024"] }),
+      validateExecutable: makeValidRuntimeValidation,
+      app: { isPackaged: false },
+      process: {
+        platform: "win32",
+        arch: "x64",
+      },
+      baseDirectory: "C:/repo",
+    });
+
+    assert.strictEqual(result.available, true);
+    assert.strictEqual(calls.restart.length, 1);
+    assert.deepStrictEqual(calls.restart[0].extraArgs, ["--image-min-tokens", "1024"]);
   });
 
   await test("packaged runtime path is used when env override is absent", async function() {

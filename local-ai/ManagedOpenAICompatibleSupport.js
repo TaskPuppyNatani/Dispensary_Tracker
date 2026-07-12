@@ -71,6 +71,7 @@ function buildManagedRuntimeOptions({ envConfig = {}, inspection = {} } = {}) {
     ctxSize: envConfig.ctxSize || inspection.contextSize,
     gpuLayers: envConfig.gpuLayers,
     startupTimeoutMs: envConfig.startupTimeoutMs,
+    extraArgs: Array.isArray(inspection.runtimeArgs) ? Array.from(inspection.runtimeArgs) : [],
   };
 }
 
@@ -83,7 +84,8 @@ function managedRuntimeNeedsRestart(runtimeStatus = {}, options = {}) {
     || readString(runtimeStatus.modelPath) !== readString(options.modelPath)
     || readString(runtimeStatus.mmprojPath) !== readString(options.mmprojPath)
     || readNullableNumber(runtimeStatus.ctxSize) !== readNullableNumber(options.ctxSize)
-    || readNullableNumber(runtimeStatus.gpuLayers) !== readNullableNumber(options.gpuLayers);
+    || readNullableNumber(runtimeStatus.gpuLayers) !== readNullableNumber(options.gpuLayers)
+    || !areStringArraysEqual(runtimeStatus.extraArgs, options.extraArgs);
 }
 
 async function ensureManagedOpenAICompatibleRuntime({
@@ -274,6 +276,13 @@ function readOptionalNonNegativeInteger(value, label) {
 function readNullableNumber(value) {
   const normalized = Number(value);
   return Number.isFinite(normalized) ? normalized : null;
+}
+
+function areStringArraysEqual(left, right) {
+  const leftValues = Array.isArray(left) ? left : [];
+  const rightValues = Array.isArray(right) ? right : [];
+  return leftValues.length === rightValues.length
+    && leftValues.every((value, index) => value === rightValues[index]);
 }
 
 function getErrorMessage(error) {
