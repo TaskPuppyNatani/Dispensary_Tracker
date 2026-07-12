@@ -6,6 +6,9 @@ const {
 const {
   resolveManagedRuntimeExecutablePath,
 } = require("./LocalAIRuntimePaths.js");
+const {
+  validateManagedRuntimeExecutable,
+} = require("./LocalAIRuntimeValidation.js");
 
 const PROVIDER_MODE_EXTERNAL_OPENAI_COMPATIBLE = "external-openai-compatible";
 const PROVIDER_MODE_MANAGED_OPENAI_COMPATIBLE = "managed-openai-compatible";
@@ -88,6 +91,7 @@ async function ensureManagedOpenAICompatibleRuntime({
   localAISettings = {},
   runtimeManager,
   inspectModel = inspectGGUFVisionModel,
+  validateExecutable = validateManagedRuntimeExecutable,
   app,
   process: processObject,
   path: pathObject,
@@ -112,12 +116,31 @@ async function ensureManagedOpenAICompatibleRuntime({
     });
   }
 
+  const runtimeValidation = validateExecutable(envConfig.executablePath, {
+    process: processObject,
+  });
+  if (!runtimeValidation || runtimeValidation.valid !== true) {
+    return createManagedResult({
+      available: false,
+      reason: envConfig.executableReason
+        || (runtimeValidation && runtimeValidation.reason)
+        || "Managed llama-server executable validation failed.",
+      envConfig,
+      runtimeValidation: runtimeValidation || null,
+      runtimeStatus: runtimeManager.getStatus(),
+      warnings: runtimeValidation && Array.isArray(runtimeValidation.warnings)
+        ? runtimeValidation.warnings
+        : [],
+    });
+  }
+
   const inspection = await inspectModel(envConfig.modelDirectory);
   if (!inspection.supported) {
     return createManagedResult({
       available: false,
       reason: inspection.errors[0] || "Managed GGUF vision model is invalid.",
       envConfig,
+      runtimeValidation,
       inspection,
       runtimeStatus: runtimeManager.getStatus(),
       warnings: inspection.warnings,
@@ -134,6 +157,7 @@ async function ensureManagedOpenAICompatibleRuntime({
       reason: getErrorMessage(error),
       envConfig,
       inspection,
+      runtimeValidation,
       runtimeStatus: runtimeManager.getStatus(),
       warnings: inspection.warnings,
       errors: inspection.errors,
@@ -154,6 +178,7 @@ async function ensureManagedOpenAICompatibleRuntime({
       reason: getErrorMessage(error),
       envConfig,
       inspection,
+      runtimeValidation,
       runtimeStatus,
       warnings: inspection.warnings,
       errors: inspection.errors,
@@ -167,6 +192,7 @@ async function ensureManagedOpenAICompatibleRuntime({
       reason: runtimeStatus.lastError || "Managed Local AI runtime is not ready.",
       envConfig,
       inspection,
+      runtimeValidation,
       runtimeStatus,
       warnings: inspection.warnings,
       errors: inspection.errors,
@@ -178,6 +204,7 @@ async function ensureManagedOpenAICompatibleRuntime({
     reason: null,
     envConfig,
     inspection,
+    runtimeValidation,
     runtimeStatus,
     providerOptions: buildOpenAICompatibleProviderOptions(localAISettings, {
       baseUrl: runtimeStatus.chatCompletionsUrl,
@@ -205,6 +232,7 @@ function createManagedResult(options = {}) {
     available: Boolean(options.available),
     reason: options.reason || null,
     envConfig: options.envConfig || {},
+    runtimeValidation: options.runtimeValidation || null,
     inspection: options.inspection || null,
     runtimeStatus: options.runtimeStatus || null,
     providerOptions: options.providerOptions || null,

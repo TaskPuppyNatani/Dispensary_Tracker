@@ -41,6 +41,18 @@ function makeInspection(overrides = {}) {
   };
 }
 
+function makeValidRuntimeValidation() {
+  return {
+    valid: true,
+    executablePath: "C:/tools/llama-server.exe",
+    platform: "win32",
+    exists: true,
+    executable: true,
+    reason: null,
+    warnings: [],
+  };
+}
+
 function createRuntimeManager(overrides = {}) {
   const calls = {
     start: [],
@@ -170,6 +182,7 @@ async function run() {
       localAISettings: makeSettings(),
       runtimeManager,
       inspectModel: async () => makeInspection(),
+      validateExecutable: makeValidRuntimeValidation,
       app: { isPackaged: false },
       process: {
         platform: "win32",
@@ -199,6 +212,7 @@ async function run() {
         supported: false,
         errors: ["Manifest invalid."],
       }),
+      validateExecutable: makeValidRuntimeValidation,
       app: { isPackaged: false },
       process: {
         platform: "win32",
@@ -236,6 +250,7 @@ async function run() {
       localAISettings: makeSettings(),
       runtimeManager,
       inspectModel: async () => makeInspection(),
+      validateExecutable: makeValidRuntimeValidation,
       app: { isPackaged: false },
       process: {
         platform: "win32",
@@ -273,6 +288,7 @@ async function run() {
       localAISettings: makeSettings(),
       runtimeManager,
       inspectModel: async () => makeInspection(),
+      validateExecutable: makeValidRuntimeValidation,
       app: { isPackaged: false },
       process: {
         platform: "win32",
@@ -297,6 +313,7 @@ async function run() {
       localAISettings: makeSettings(),
       runtimeManager,
       inspectModel: async () => makeInspection(),
+      validateExecutable: makeValidRuntimeValidation,
       app: { isPackaged: true },
       process: {
         platform: "win32",
@@ -344,6 +361,46 @@ async function run() {
     assert.strictEqual(result.reason, "process.resourcesPath is unavailable.");
     assert.strictEqual(calls.start.length, 0);
     assert.strictEqual(result.envConfig.executableSource, "packaged");
+  });
+
+  await test("invalid executable leaves AI unavailable before manifest inspection or runtime start", async function() {
+    const { runtimeManager, calls } = createRuntimeManager();
+    let manifestInspectionCalls = 0;
+    const result = await ensureManagedOpenAICompatibleRuntime({
+      env: {
+        LOCAL_AI_PROVIDER_MODE: PROVIDER_MODE_MANAGED_OPENAI_COMPATIBLE,
+        LOCAL_AI_LLAMA_SERVER_PATH: "C:/missing/llama-server.exe",
+        LOCAL_AI_MODEL_DIR: "C:/models/qwen",
+      },
+      localAISettings: makeSettings(),
+      runtimeManager,
+      inspectModel: async () => {
+        manifestInspectionCalls += 1;
+        return makeInspection();
+      },
+      validateExecutable: () => ({
+        valid: false,
+        executablePath: "C:/missing/llama-server.exe",
+        platform: "win32",
+        exists: false,
+        executable: false,
+        reason: "Managed llama-server executable does not exist: C:/missing/llama-server.exe",
+        warnings: [],
+      }),
+      app: { isPackaged: false },
+      process: {
+        platform: "win32",
+        arch: "x64",
+      },
+      baseDirectory: "C:/repo",
+    });
+
+    assert.strictEqual(result.available, false);
+    assert.strictEqual(result.reason, "Managed llama-server executable does not exist: C:/missing/llama-server.exe");
+    assert.strictEqual(result.runtimeValidation.exists, false);
+    assert.strictEqual(manifestInspectionCalls, 0);
+    assert.strictEqual(calls.start.length, 0);
+    assert.strictEqual(calls.restart.length, 0);
   });
 
   await test("app shutdown helper stops managed runtime only when running", async function() {
