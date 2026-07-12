@@ -10,6 +10,7 @@ const {
   buildOpenAICompatibleProviderOptions,
   readManagedRuntimeEnvironment,
   buildManagedRuntimeOptions,
+  createManagedRuntimeExtraArgs,
   managedRuntimeNeedsRestart,
   ensureManagedOpenAICompatibleRuntime,
   stopManagedRuntime,
@@ -167,7 +168,7 @@ async function run() {
       ctxSize: 32768,
       gpuLayers: 20,
       startupTimeoutMs: 45000,
-      extraArgs: [],
+      extraArgs: ["--alias", "qwen2.5-vl-3b-gguf"],
     });
     assert.strictEqual(envConfig.executableSource, "env");
     assert.strictEqual(envConfig.executableReason, null);
@@ -315,7 +316,7 @@ async function run() {
       mmprojPath: "C:/models/qwen/mmproj.gguf",
       ctxSize: 16384,
       gpuLayers: null,
-      extraArgs: [],
+      extraArgs: ["--alias", "qwen2.5-vl-3b-gguf"],
       chatCompletionsUrl: "http://127.0.0.1:34560/v1/chat/completions",
       logs: [],
       lastError: null,
@@ -341,7 +342,61 @@ async function run() {
 
     assert.strictEqual(result.available, true);
     assert.strictEqual(calls.restart.length, 1);
-    assert.deepStrictEqual(calls.restart[0].extraArgs, ["--image-min-tokens", "1024"]);
+    assert.deepStrictEqual(calls.restart[0].extraArgs, [
+      "--image-min-tokens",
+      "1024",
+      "--alias",
+      "qwen2.5-vl-3b-gguf",
+    ]);
+  });
+
+  await test("manifest model ID becomes one llama-server alias while existing non-alias runtime arguments remain", async function() {
+    const options = buildManagedRuntimeOptions({
+      envConfig: {
+        executablePath: "C:/tools/llama-server.exe",
+        ctxSize: null,
+        gpuLayers: null,
+        startupTimeoutMs: null,
+      },
+      inspection: makeInspection({
+        modelId: "qwen3-vl-2b-qa-k-xl",
+        runtimeArgs: ["--flash-attn", "--alias", "stale-alias", "--image-min-tokens", "1024"],
+      }),
+    });
+
+    assert.deepStrictEqual(options.extraArgs, [
+      "--flash-attn",
+      "--image-min-tokens",
+      "1024",
+      "--alias",
+      "qwen3-vl-2b-qa-k-xl",
+    ]);
+    assert.strictEqual(options.extraArgs.filter((argument) => argument === "--alias").length, 1);
+  });
+
+  await test("inline alias arguments are removed before the manifest alias is added", async function() {
+    const extraArgs = createManagedRuntimeExtraArgs(makeInspection({
+      modelId: "canonical-model-id",
+      runtimeArgs: ["--alias=stale-alias", "--flash-attn"],
+    }));
+    assert.deepStrictEqual(extraArgs, ["--flash-attn", "--alias", "canonical-model-id"]);
+  });
+
+  await test("changed manifest model ID requires a managed runtime restart", async function() {
+    const currentStatus = {
+      running: true,
+      executablePath: "C:/tools/llama-server.exe",
+      modelPath: "C:/models/qwen/model.gguf",
+      mmprojPath: "C:/models/qwen/mmproj.gguf",
+      ctxSize: 16384,
+      gpuLayers: null,
+      extraArgs: ["--alias", "old-model-id"],
+    };
+    const nextOptions = buildManagedRuntimeOptions({
+      envConfig: { executablePath: "C:/tools/llama-server.exe", ctxSize: null, gpuLayers: null, startupTimeoutMs: null },
+      inspection: makeInspection({ modelId: "new-model-id" }),
+    });
+    assert.strictEqual(managedRuntimeNeedsRestart(currentStatus, nextOptions), true);
   });
 
   await test("packaged runtime path is used when env override is absent", async function() {

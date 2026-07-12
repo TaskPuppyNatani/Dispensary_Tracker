@@ -71,7 +71,7 @@ function buildManagedRuntimeOptions({ envConfig = {}, inspection = {} } = {}) {
     ctxSize: envConfig.ctxSize || inspection.contextSize,
     gpuLayers: envConfig.gpuLayers,
     startupTimeoutMs: envConfig.startupTimeoutMs,
-    extraArgs: Array.isArray(inspection.runtimeArgs) ? Array.from(inspection.runtimeArgs) : [],
+    extraArgs: createManagedRuntimeExtraArgs(inspection),
   };
 }
 
@@ -285,6 +285,25 @@ function areStringArraysEqual(left, right) {
     && leftValues.every((value, index) => value === rightValues[index]);
 }
 
+function createManagedRuntimeExtraArgs(inspection = {}) {
+  const runtimeArgs = Array.isArray(inspection.runtimeArgs) ? inspection.runtimeArgs : [];
+  const extraArgs = [];
+
+  for (let index = 0; index < runtimeArgs.length; index += 1) {
+    const argument = runtimeArgs[index];
+    if (argument === "--alias") {
+      index += 1;
+      continue;
+    }
+    if (typeof argument === "string" && argument.startsWith("--alias=")) {
+      continue;
+    }
+    extraArgs.push(argument);
+  }
+
+  return [...extraArgs, "--alias", inspection.modelId];
+}
+
 function getErrorMessage(error) {
   return error && error.message ? String(error.message) : String(error);
 }
@@ -296,6 +315,7 @@ module.exports = {
   buildOpenAICompatibleProviderOptions,
   readManagedRuntimeEnvironment,
   buildManagedRuntimeOptions,
+  createManagedRuntimeExtraArgs,
   managedRuntimeNeedsRestart,
   ensureManagedOpenAICompatibleRuntime,
   stopManagedRuntime,

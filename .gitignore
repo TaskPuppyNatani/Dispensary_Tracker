@@ -1,3 +1,5 @@
 node_modules/
 dist/
-models/
+models/resources/local-ai-runtime/win32/x64/*
+!resources/local-ai-runtime/win32/x64/.gitkeep
+docs/test-receipts/*.jpg
