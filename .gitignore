@@ -15,4 +15,4 @@ docs/test-receipts/*.png
 # Local AI models
 models/**/*.gguf
 models/**/*.bin
-models/**/mmproj*
+models/**/mmproj*models/ 
